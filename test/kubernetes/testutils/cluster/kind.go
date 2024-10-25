@@ -29,7 +29,8 @@ func MustKindContextWithScheme(clusterName string, scheme *runtime.Scheme) *Cont
 		clusterName = "kind"
 	}
 
-	kubeCtx := fmt.Sprintf("kind-%s", clusterName)
+	//	kubeCtx := fmt.Sprintf("kind-%s", clusterName)
+	kubeCtx := fmt.Sprintf("%s", clusterName)
 
 	restCfg, err := kubeutils.GetRestConfigWithKubeContext(kubeCtx)
 	if err != nil {
