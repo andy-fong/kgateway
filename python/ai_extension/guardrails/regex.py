@@ -3,7 +3,6 @@ from presidio_analyzer import EntityRecognizer
 from presidio_anonymizer.entities import RecognizerResult
 from presidio_anonymizer import AnonymizerEngine
 
-
 def regex_transform(
     role: str,
     content: str,
@@ -21,6 +20,7 @@ def regex_transform(
         # if we have results and the action is to reject, raise an error
         if len(results) > 0 and action == prompt_guard.Action.REJECT:
             raise RegexRejection(" ".join([str(i) for i in results]))
+
         anonymized = anon.anonymize(
             text=content,
             analyzer_results=[
