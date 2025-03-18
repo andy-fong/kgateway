@@ -3,6 +3,7 @@ from presidio_analyzer import EntityRecognizer
 from presidio_anonymizer.entities import RecognizerResult
 from presidio_anonymizer import AnonymizerEngine
 
+
 def regex_transform(
     role: str,
     content: str,

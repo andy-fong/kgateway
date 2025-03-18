@@ -54,7 +54,9 @@ class Regex:
         matches = [RegexMatch.from_json(m) for m in data.get("matches", [])]
         builtins = [BuiltIn[b] for b in data.get("builtins", [])]
         return Regex(
-            matches=matches, builtins=builtins, action=Action(data.get("action", "MASK"))
+            matches=matches,
+            builtins=builtins,
+            action=Action(data.get("action", "MASK")),
         )
 
 
@@ -84,6 +86,7 @@ class HTTPHeaderMatch:
         return HTTPHeaderMatch(
             type=Type(data.get("type", "Exact")), name=data["name"], value=data["value"]
         )
+
 
 @dataclass
 class Webhook:

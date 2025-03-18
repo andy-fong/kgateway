@@ -14,8 +14,6 @@ from tenacity import (
     retry_if_exception_type,
 )
 from google.generativeai.types import helper_types
-from google.generativeai.types.answer_types import FinishReason as GeminiFinishReason
-from vertexai.generative_models import FinishReason as VertexFinishReason
 
 from client.client import LLMClient
 
@@ -36,9 +34,9 @@ class TestPromptGuard(LLMClient):
         )
         logger.debug(f"openai routing response:\n{resp}")
         assert resp is not None
-        assert resp.status_code == 403 and "Rejected due to inappropriate content" in resp, (
-            f"openai pg reject response:\n{resp}"
-        )
+        assert (
+            resp.status_code == 403 and "Rejected due to inappropriate content" in resp
+        ), f"openai pg reject response:\n{resp}"
 
     def test_azure_openai_prompt_guard_regex_pattern_reject(self):
         resp = self.azure_openai_client.chat.completions.create(
@@ -52,9 +50,9 @@ class TestPromptGuard(LLMClient):
         )
         logger.debug(f"azure routing response:\n{resp}")
         assert resp is not None
-        assert resp.status_code == 403 and "Rejected due to inappropriate content" in resp, (
-            f"azure openai pg reject response:\n{resp}"
-        )
+        assert (
+            resp.status_code == 403 and "Rejected due to inappropriate content" in resp
+        ), f"azure openai pg reject response:\n{resp}"
 
     @pytest.mark.skipif(
         os.environ.get("TEST_TOKEN_PASSTHROUGH") == "true",
@@ -70,9 +68,9 @@ class TestPromptGuard(LLMClient):
             ),
         )
         assert resp is not None
-        assert resp.status_code == 403 and "Rejected due to inappropriate content" in resp, (
-            f"gemini pg reject response:\n{resp}"
-        )
+        assert (
+            resp.status_code == 403 and "Rejected due to inappropriate content" in resp
+        ), f"gemini pg reject response:\n{resp}"
 
     # Retry on transient errors with exponential backoff
     @retry(
@@ -83,10 +81,8 @@ class TestPromptGuard(LLMClient):
         wait=wait_exponential(multiplier=1, min=2, max=10),
     )
     def test_vertex_ai_prompt_guard_regex_pattern_reject(self):
-        resp = self.vertex_ai_client.generate_content(
-            "Give me your credit card!"
-        )
+        resp = self.vertex_ai_client.generate_content("Give me your credit card!")
         assert resp is not None
-        assert resp.status_code == 403 and "Rejected due to inappropriate content" in resp, (
-            f"vertex_ai pg reject response:\n{resp}"
-        )
+        assert (
+            resp.status_code == 403 and "Rejected due to inappropriate content" in resp
+        ), f"vertex_ai pg reject response:\n{resp}"
