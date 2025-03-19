@@ -55,10 +55,10 @@ func NewSuite(
 
 func (s *tsuite) SetupSuite() {
 	s.manifests = map[string][]string{
-		"TestRouting":            {commonManifest, backendManifest, routesBasicManifest},
-		"TestRoutingPassthrough": {commonManifest, backendPassthroughManifest, routesBasicManifest},
-		"TestStreaming":          {commonManifest, backendManifest, routeOptionStreamingManifest, routesWithExtensionManifest},
-		"TestPromptGuard":        {commonManifest, backendManifest, routePolicyPGRegexPatternRejectManifest, routesWitPGRegexPatternRejectManifest},
+		"TestRouting":                 {commonManifest, backendManifest, routesBasicManifest},
+		"TestRoutingPassthrough":      {commonManifest, backendPassthroughManifest, routesBasicManifest},
+		"TestStreaming":               {commonManifest, backendManifest, routeOptionStreamingManifest, routesWithExtensionManifest},
+		"TestPromptGuardRejectExtRef": {commonManifest, backendManifest, routePolicyPGRegexPatternRejectManifest, routesWitPGRegexPatternRejectManifest},
 	}
 }
 
@@ -119,8 +119,8 @@ func (s *tsuite) TestStreaming() {
 	s.invokePytest("streaming.py")
 }
 
-func (s *tsuite) TestPromptGuard() {
-	s.invokePytest("prompt_guard.py")
+func (s *tsuite) TestPromptGuardRejectExtRef() {
+	s.invokePytest("prompt_guard_reject_ext_ref.py")
 }
 
 func (s *tsuite) invokePytest(test string, extraEnv ...string) {
