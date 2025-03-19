@@ -9,7 +9,7 @@ logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
 
 
-class TestPromptGuard(LLMClient):
+class TestPromptGuardRejectExtRef(LLMClient):
     reject_message = "Rejected due to inappropriate content"
 
     def test_openai_prompt_guard_regex_pattern_reject(self):
