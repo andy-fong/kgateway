@@ -6,11 +6,9 @@ import (
 	"net/http"
 	"time"
 
-	envoyhttp "github.com/envoyproxy/go-control-plane/envoy/extensions/filters/network/http_connection_manager/v3"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
 	corev3 "github.com/envoyproxy/go-control-plane/envoy/config/core/v3"
-	envoy_config_listener_v3 "github.com/envoyproxy/go-control-plane/envoy/config/listener/v3"
 	envoy_config_route_v3 "github.com/envoyproxy/go-control-plane/envoy/config/route/v3"
 	skubeclient "istio.io/istio/pkg/config/schema/kubeclient"
 	"istio.io/istio/pkg/kube/kclient"
@@ -23,7 +21,6 @@ import (
 	"github.com/kgateway-dev/kgateway/v2/internal/kgateway/extensions2/common"
 	extensionplug "github.com/kgateway-dev/kgateway/v2/internal/kgateway/extensions2/plugin"
 	"github.com/kgateway-dev/kgateway/v2/internal/kgateway/ir"
-	"github.com/kgateway-dev/kgateway/v2/internal/kgateway/plugins"
 	"github.com/kgateway-dev/kgateway/v2/internal/kgateway/reports"
 	"github.com/kgateway-dev/kgateway/v2/internal/kgateway/wellknown"
 	"github.com/kgateway-dev/kgateway/v2/pkg/client/clientset/versioned"
@@ -52,15 +49,7 @@ type directResponsePluginGwPass struct {
 	reporter reports.Reporter
 }
 
-func (p *directResponsePluginGwPass) ApplyHCM(ctx context.Context, pCtx *ir.HcmContext, out *envoyhttp.HttpConnectionManager) error {
-	// no op
-	return nil
-}
-
-func (p *directResponsePluginGwPass) ApplyForBackend(ctx context.Context, pCtx *ir.RouteBackendContext, in ir.HttpBackend, out *envoy_config_route_v3.Route) error {
-	// no op
-	return nil
-}
+var _ ir.ProxyTranslationPass = &directResponsePluginGwPass{}
 
 func registerTypes(ourCli versioned.Interface) {
 	skubeclient.Register[*v1alpha1.DirectResponse](
@@ -78,7 +67,10 @@ func registerTypes(ourCli versioned.Interface) {
 func NewPlugin(ctx context.Context, commoncol *common.CommonCollections) extensionplug.Plugin {
 	registerTypes(commoncol.OurClient)
 
-	col := krt.WrapClient(kclient.New[*v1alpha1.DirectResponse](commoncol.Client), commoncol.KrtOpts.ToOptions("DirectResponse")...)
+	col := krt.WrapClient(kclient.NewFiltered[*v1alpha1.DirectResponse](
+		commoncol.Client,
+		kclient.Filter{ObjectFilter: commoncol.Client.ObjectFilter()},
+	), commoncol.KrtOpts.ToOptions("DirectResponse")...)
 
 	gk := wellknown.DirectResponseGVK.GroupKind()
 	policyCol := krt.NewCollection(col, func(krtctx krt.HandlerContext, i *v1alpha1.DirectResponse) *ir.PolicyWrapper {
@@ -113,13 +105,6 @@ func NewGatewayTranslationPass(ctx context.Context, tctx ir.GwTranslationCtx, re
 	return &directResponsePluginGwPass{
 		reporter: reporter,
 	}
-}
-
-// called 1 time for each listener
-func (p *directResponsePluginGwPass) ApplyListenerPlugin(ctx context.Context, pCtx *ir.ListenerContext, out *envoy_config_listener_v3.Listener) {
-}
-
-func (p *directResponsePluginGwPass) ApplyVhostPlugin(ctx context.Context, pCtx *ir.VirtualHostContext, out *envoy_config_route_v3.VirtualHost) {
 }
 
 // called one or more times per route rule
@@ -160,20 +145,4 @@ func (p *directResponsePluginGwPass) ApplyForRouteBackend(
 	pCtx *ir.RouteBackendContext,
 ) error {
 	return ir.ErrNotAttachable
-}
-
-// called 1 time per listener
-// if a plugin emits new filters, they must be with a plugin unique name.
-// any filter returned from route config must be disabled, so it doesnt impact other routes.
-func (p *directResponsePluginGwPass) HttpFilters(ctx context.Context, fcc ir.FilterChainCommon) ([]plugins.StagedHttpFilter, error) {
-	return nil, nil
-}
-
-func (p *directResponsePluginGwPass) NetworkFilters(ctx context.Context) ([]plugins.StagedNetworkFilter, error) {
-	return nil, nil
-}
-
-// called 1 time (per envoy proxy). replaces GeneratedResources
-func (p *directResponsePluginGwPass) ResourcesToAdd(ctx context.Context) ir.Resources {
-	return ir.Resources{}
 }

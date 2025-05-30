@@ -7,10 +7,7 @@ import (
 	"time"
 
 	envoyaccesslog "github.com/envoyproxy/go-control-plane/envoy/config/accesslog/v3"
-	envoy_config_listener_v3 "github.com/envoyproxy/go-control-plane/envoy/config/listener/v3"
-	envoy_config_route_v3 "github.com/envoyproxy/go-control-plane/envoy/config/route/v3"
 	envoy_hcm "github.com/envoyproxy/go-control-plane/envoy/extensions/filters/network/http_connection_manager/v3"
-	"github.com/solo-io/go-utils/contextutils"
 	"google.golang.org/protobuf/proto"
 	skubeclient "istio.io/istio/pkg/config/schema/kubeclient"
 	"istio.io/istio/pkg/kube/kclient"
@@ -23,12 +20,15 @@ import (
 	"github.com/kgateway-dev/kgateway/v2/api/v1alpha1"
 	"github.com/kgateway-dev/kgateway/v2/internal/kgateway/extensions2/common"
 	extensionsplug "github.com/kgateway-dev/kgateway/v2/internal/kgateway/extensions2/plugin"
+	"github.com/kgateway-dev/kgateway/v2/internal/kgateway/extensions2/pluginutils"
 	"github.com/kgateway-dev/kgateway/v2/internal/kgateway/ir"
-	"github.com/kgateway-dev/kgateway/v2/internal/kgateway/plugins"
 	"github.com/kgateway-dev/kgateway/v2/internal/kgateway/reports"
 	"github.com/kgateway-dev/kgateway/v2/internal/kgateway/wellknown"
 	"github.com/kgateway-dev/kgateway/v2/pkg/client/clientset/versioned"
+	"github.com/kgateway-dev/kgateway/v2/pkg/logging"
 )
+
+var logger = logging.New("plugin/httplistenerpolicy")
 
 type httpListenerPolicy struct {
 	ct        time.Time
@@ -60,14 +60,7 @@ type httpListenerPolicyPluginGwPass struct {
 	reporter reports.Reporter
 }
 
-func (p *httpListenerPolicyPluginGwPass) ApplyForBackend(ctx context.Context, pCtx *ir.RouteBackendContext, in ir.HttpBackend, out *envoy_config_route_v3.Route) error {
-	// no op
-	return nil
-}
-
-func (p *httpListenerPolicyPluginGwPass) ApplyListenerPlugin(ctx context.Context, pCtx *ir.ListenerContext, out *envoy_config_listener_v3.Listener) {
-	// no op
-}
+var _ ir.ProxyTranslationPass = &httpListenerPolicyPluginGwPass{}
 
 func registerTypes(ourCli versioned.Interface) {
 	skubeclient.Register[*v1alpha1.HTTPListenerPolicy](
@@ -85,7 +78,10 @@ func registerTypes(ourCli versioned.Interface) {
 func NewPlugin(ctx context.Context, commoncol *common.CommonCollections) extensionsplug.Plugin {
 	registerTypes(commoncol.OurClient)
 
-	col := krt.WrapClient(kclient.New[*v1alpha1.HTTPListenerPolicy](commoncol.Client), commoncol.KrtOpts.ToOptions("HTTPListenerPolicy")...)
+	col := krt.WrapClient(kclient.NewFiltered[*v1alpha1.HTTPListenerPolicy](
+		commoncol.Client,
+		kclient.Filter{ObjectFilter: commoncol.Client.ObjectFilter()},
+	), commoncol.KrtOpts.ToOptions("HTTPListenerPolicy")...)
 	gk := wellknown.HTTPListenerPolicyGVK.GroupKind()
 	policyCol := krt.NewCollection(col, func(krtctx krt.HandlerContext, i *v1alpha1.HTTPListenerPolicy) *ir.PolicyWrapper {
 		objSrc := ir.ObjectSource{
@@ -98,7 +94,7 @@ func NewPlugin(ctx context.Context, commoncol *common.CommonCollections) extensi
 		errs := []error{}
 		accessLog, err := convertAccessLogConfig(ctx, i, commoncol, krtctx, objSrc)
 		if err != nil {
-			contextutils.LoggerFrom(ctx).Error(err)
+			logger.Error("error translating access log", "error", err)
 			errs = append(errs, err)
 		}
 
@@ -109,7 +105,7 @@ func NewPlugin(ctx context.Context, commoncol *common.CommonCollections) extensi
 				ct:        i.CreationTimestamp.Time,
 				accessLog: accessLog,
 			},
-			TargetRefs: convert(i.Spec.TargetRefs),
+			TargetRefs: pluginutils.TargetRefsToPolicyRefs(i.Spec.TargetRefs, i.Spec.TargetSelectors),
 			Errors:     errs,
 		}
 
@@ -127,18 +123,6 @@ func NewPlugin(ctx context.Context, commoncol *common.CommonCollections) extensi
 			},
 		},
 	}
-}
-
-func convert(targetRefs []v1alpha1.LocalPolicyTargetReference) []ir.PolicyRef {
-	refs := make([]ir.PolicyRef, 0, len(targetRefs))
-	for _, targetRef := range targetRefs {
-		refs = append(refs, ir.PolicyRef{
-			Kind:  string(targetRef.Kind),
-			Name:  string(targetRef.Name),
-			Group: string(targetRef.Group),
-		})
-	}
-	return refs
 }
 
 func NewGatewayTranslationPass(ctx context.Context, tctx ir.GwTranslationCtx, reporter reports.Reporter) ir.ProxyTranslationPass {
@@ -164,36 +148,4 @@ func (p *httpListenerPolicyPluginGwPass) ApplyHCM(
 	// translate access logging configuration
 	out.AccessLog = append(out.GetAccessLog(), policy.accessLog...)
 	return nil
-}
-
-func (p *httpListenerPolicyPluginGwPass) ApplyVhostPlugin(ctx context.Context, pCtx *ir.VirtualHostContext, out *envoy_config_route_v3.VirtualHost) {
-}
-
-// called 0 or more times
-func (p *httpListenerPolicyPluginGwPass) ApplyForRoute(ctx context.Context, pCtx *ir.RouteContext, outputRoute *envoy_config_route_v3.Route) error {
-	return nil
-}
-
-func (p *httpListenerPolicyPluginGwPass) ApplyForRouteBackend(
-	ctx context.Context,
-	policy ir.PolicyIR,
-	pCtx *ir.RouteBackendContext,
-) error {
-	return nil
-}
-
-// called 1 time per listener
-// if a plugin emits new filters, they must be with a plugin unique name.
-// any filter returned from listener config must be disabled, so it doesnt impact other listeners.
-func (p *httpListenerPolicyPluginGwPass) HttpFilters(ctx context.Context, fcc ir.FilterChainCommon) ([]plugins.StagedHttpFilter, error) {
-	return nil, nil
-}
-
-func (p *httpListenerPolicyPluginGwPass) NetworkFilters(ctx context.Context) ([]plugins.StagedNetworkFilter, error) {
-	return nil, nil
-}
-
-// called 1 time (per envoy proxy). replaces GeneratedResources
-func (p *httpListenerPolicyPluginGwPass) ResourcesToAdd(ctx context.Context) ir.Resources {
-	return ir.Resources{}
 }
