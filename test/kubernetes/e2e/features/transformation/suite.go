@@ -312,6 +312,21 @@ func (s *testingSuite) TestGatewayRustformationsWithTransformedRoute() {
 		opts      []curl.Option
 		resp      *testmatchers.HttpResponse
 	}{
+		/*
+			{
+				name:      "basic-gateway-attached",
+				routeName: "gateway-attached-transform",
+				resp: &testmatchers.HttpResponse{
+					StatusCode: http.StatusOK,
+					Headers: map[string]interface{}{
+						"response-gateway": "goodbye",
+					},
+					NotHeaders: []string{
+						"x-foo-response",
+					},
+				},
+			},
+		*/
 		{
 			name:      "basic",
 			routeName: "headers",
@@ -322,6 +337,9 @@ func (s *testingSuite) TestGatewayRustformationsWithTransformedRoute() {
 				StatusCode: http.StatusOK,
 				Headers: map[string]interface{}{
 					"x-foo-response": "notsuper",
+				},
+				NotHeaders: []string{
+					"response-gateway",
 				},
 			},
 		},
@@ -339,6 +357,47 @@ func (s *testingSuite) TestGatewayRustformationsWithTransformedRoute() {
 				},
 			},
 		},
+		/*
+			{
+				name:      "pull json info", // shows we parse the body as json
+				routeName: "route-for-body-json",
+				opts: []curl.Option{
+					curl.WithBody(`{"mykey": {"myinnerkey": "myinnervalue"}}`),
+					curl.WithHeader("X-Incoming-Stuff", "super"),
+				},
+				resp: &testmatchers.HttpResponse{
+					StatusCode: http.StatusOK,
+					Headers: map[string]interface{}{
+						"x-how-great":   "level_super",
+						"from-incoming": "key_level_myinnervalue",
+					},
+				},
+			},
+			{
+				name:      "dont pull info if we dont parse json", // shows we parse the body as json
+				routeName: "route-for-body",
+				opts: []curl.Option{
+					curl.WithBody(`{"mykey": {"myinnerkey": "myinnervalue"}}`),
+					curl.WithHeader("X-Incoming-Stuff", "super"),
+				},
+				resp: &testmatchers.HttpResponse{
+					StatusCode: http.StatusBadRequest, // bad transformation results in 400
+					NotHeaders: []string{
+						"x-how-great",
+					},
+				},
+			},
+			{
+				name:      "dont pull json info  if not json", // shows we parse the body as json
+				routeName: "route-for-body-json",
+				opts: []curl.Option{
+					curl.WithBody("hello"),
+				},
+				resp: &testmatchers.HttpResponse{
+					StatusCode: http.StatusBadRequest, // transformation should choke
+				},
+			},
+		*/
 	}
 	for _, tc := range testCases {
 		s.testInstallation.Assertions.AssertEventualCurlResponse(

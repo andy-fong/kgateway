@@ -217,6 +217,7 @@ func NewPlugin(ctx context.Context, commoncol *common.CommonCollections) extensi
 	registerTypes(commoncol.OurClient)
 
 	useRustformations = commoncol.Settings.UseRustFormations // stash the state of the env setup for rustformation usage
+	logger.Info("useRustformations: ", strconv.FormatBool(useRustformations))
 
 	col := krt.WrapClient(kclient.NewFiltered[*v1alpha1.TrafficPolicy](
 		commoncol.Client,
@@ -592,7 +593,14 @@ func (p *trafficPolicyPluginGwPass) handlePolicies(
 	typedFilterConfig *ir.TypedFilterConfigMap,
 	spec trafficPolicySpecIr,
 ) {
-	p.handleTransformation(fcn, typedFilterConfig, spec.transformation)
+	if useRustformations {
+		logger.Info("using rustformation for route config")
+		p.handleRustTransformation(fcn, typedFilterConfig, spec.rustformation.config)
+	} else {
+		logger.Info("NOT using rustformation for route config")
+		p.handleTransformation(fcn, typedFilterConfig, spec.transformation)
+	}
+
 	// Apply ExtAuthz configuration if present
 	// ExtAuth does not allow for most information such as destination
 	// to be set at the route level so we need to smuggle info upwards.

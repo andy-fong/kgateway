@@ -334,3 +334,8 @@ func (p *trafficPolicyPluginGwPass) handleTransformation(fcn string, typedFilter
 		p.setTransformationInChain[fcn] = true
 	}
 }
+
+func (p *trafficPolicyPluginGwPass) handleRustTransformation(fcn string, typedFilterConfig *ir.TypedFilterConfigMap, rustTransform proto.Message) {
+	typedFilterConfig.AddTypedConfig(rustformationFilterNamePrefix, rustTransform)
+	p.setTransformationInChain[fcn] = true
+}
