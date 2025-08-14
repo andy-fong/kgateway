@@ -264,6 +264,19 @@ func (s *testingSuite) TestGatewayRustformationsWithTransformedRoute() {
 		resp      *testmatchers.HttpResponse
 	}{
 		{
+			name:      "basic-gateway-attached",
+			routeName: "gateway-attached-transform",
+			resp: &testmatchers.HttpResponse{
+				StatusCode: http.StatusOK,
+				Headers: map[string]interface{}{
+					"response-gateway": "goodbye",
+				},
+				NotHeaders: []string{
+					"x-foo-response",
+				},
+			},
+		},
+		{
 			name:      "basic",
 			routeName: "headers",
 			opts: []curl.Option{
@@ -273,6 +286,9 @@ func (s *testingSuite) TestGatewayRustformationsWithTransformedRoute() {
 				StatusCode: http.StatusOK,
 				Headers: map[string]interface{}{
 					"x-foo-response": "notsuper",
+				},
+				NotHeaders: []string{
+					"response-gateway",
 				},
 			},
 		},
@@ -290,6 +306,47 @@ func (s *testingSuite) TestGatewayRustformationsWithTransformedRoute() {
 				},
 			},
 		},
+		/*
+			{
+				name:      "pull json info", // shows we parse the body as json
+				routeName: "route-for-body-json",
+				opts: []curl.Option{
+					curl.WithBody(`{"mykey": {"myinnerkey": "myinnervalue"}}`),
+					curl.WithHeader("X-Incoming-Stuff", "super"),
+				},
+				resp: &testmatchers.HttpResponse{
+					StatusCode: http.StatusOK,
+					Headers: map[string]interface{}{
+						"x-how-great":   "level_super",
+						"from-incoming": "key_level_myinnervalue",
+					},
+				},
+			},
+				{
+					name:      "dont pull info if we dont parse json", // shows we parse the body as json
+					routeName: "route-for-body",
+					opts: []curl.Option{
+						curl.WithBody(`{"mykey": {"myinnerkey": "myinnervalue"}}`),
+						curl.WithHeader("X-Incoming-Stuff", "super"),
+					},
+					resp: &testmatchers.HttpResponse{
+						StatusCode: http.StatusBadRequest, // bad transformation results in 400
+						NotHeaders: []string{
+							"x-how-great",
+						},
+					},
+				},
+				{
+					name:      "dont pull json info  if not json", // shows we parse the body as json
+					routeName: "route-for-body-json",
+					opts: []curl.Option{
+						curl.WithBody("hello"),
+					},
+					resp: &testmatchers.HttpResponse{
+						StatusCode: http.StatusBadRequest, // transformation should choke
+					},
+				},
+		*/
 	}
 	for _, tc := range testCases {
 		s.TestInstallation.Assertions.AssertEventualCurlResponse(
@@ -374,8 +431,6 @@ func (s *testingSuite) dynamicModuleAssertion(shouldBeLoaded bool) func(ctx cont
 			dynamicModuleLoaded := strings.Contains(listener.String(), "dynamic_modules/")
 			if shouldBeLoaded {
 				g.Expect(dynamicModuleLoaded).To(gomega.BeTrue(), fmt.Sprintf("dynamic module not loaded: %v", listener.String()))
-				dynamicModuleRouteConfigured := strings.Contains(listener.String(), "transformation/helper")
-				g.Expect(dynamicModuleRouteConfigured).To(gomega.BeTrue(), fmt.Sprintf("dynamic module routespecific not loaded: %v", listener.String()))
 			} else {
 				g.Expect(dynamicModuleLoaded).To(gomega.BeFalse(), fmt.Sprintf("dynamic module should not be loaded: %v", listener.String()))
 			}

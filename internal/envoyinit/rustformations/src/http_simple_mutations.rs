@@ -8,21 +8,35 @@ use mockall::*;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-/// This implements the [`envoy_proxy_dynamic_modules_rust_sdk::HttpFilterConfig`] trait.
-///
-/// The trait corresponds to a Envoy filter chain configuration.
-
-#[derive(Serialize, Deserialize)]
-pub struct FilterConfig {
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct PerRouteConfig {
     #[serde(default)]
     request_headers_setter: Vec<(String, String)>,
     #[serde(default)]
     response_headers_setter: Vec<(String, String)>,
-    route_specific: HashMap<String, String>,
 }
 
-#[derive(Serialize, Deserialize, Clone)]
-pub struct PerRouteConfig {
+impl PerRouteConfig {
+    pub fn new(config: &str) -> Option<Self> {
+        let per_route_config: PerRouteConfig = match serde_json::from_str(config) {
+            Ok(cfg) => cfg,
+            Err(err) => {
+                // TODO(nfuden): Dont panic if there is incorrect configuration
+                eprintln!("{}:{} Error parsing per route config: {config} {err}", file!(), line!());
+                return None;
+            }
+        };
+        dbg!("per_route_config: {:?}", &per_route_config);
+        Some(per_route_config)
+    }
+}
+
+/// This implements the [`envoy_proxy_dynamic_modules_rust_sdk::HttpFilterConfig`] trait.
+///
+/// The trait corresponds to a Envoy filter chain configuration.
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct FilterConfig {
     #[serde(default)]
     request_headers_setter: Vec<(String, String)>,
     #[serde(default)]
@@ -40,7 +54,7 @@ impl FilterConfig {
             Ok(cfg) => cfg,
             Err(err) => {
                 // TODO(nfuden): Dont panic if there is incorrect configuration
-                eprintln!("Error parsing filter config: {err}");
+                eprintln!("{}:{} Error parsing filter config: {filter_config} {err}", file!(), line!());
                 return None;
             }
         };
@@ -86,28 +100,13 @@ impl<EC: EnvoyHttpFilterConfig, EHF: EnvoyHttpFilter> HttpFilterConfig<EC, EHF> 
         // env.add_function("context", context);
         // env.add_function("env", env);
 
-        // attempt to unmarshal the route_specific strings into RouteSpecificConfigs
-        // TODO(nfuden): remove this once upstream allows for real route specific configs
-        let mut specific = HashMap::new();
-        for (key, value) in self.route_specific.iter() {
-            let route_specific: PerRouteConfig = match serde_json::from_str(value) {
-                Ok(cfg) => cfg,
-                Err(err) => {
-                    eprintln!("Error parsing route specific config: {err} {value}");
-                    continue;
-                }
-            };
-            specific.insert(key.clone(), route_specific);
-        }
-
         // specific.extend(self.route_specific.into_iter());
 
         Box::new(Filter {
             request_headers_setter: self.request_headers_setter.clone(),
             // request_headers_extractions: self.request_headers_extractions.clone(),
             response_headers_setter: self.response_headers_setter.clone(),
-            // clone the hashmap
-            route_specific: specific,
+            per_route_config: None,
             env,
         })
     }
@@ -160,8 +159,35 @@ pub struct Filter {
     request_headers_setter: Vec<(String, String)>,
     // request_headers_extractions: Vec<(String, String)>,
     response_headers_setter: Vec<(String, String)>,
-    route_specific: HashMap<String, PerRouteConfig>,
+    per_route_config: Option<Box<PerRouteConfig>>,
     env: Environment<'static>,
+}
+
+impl Filter {
+    fn set_per_route_config<EHF: EnvoyHttpFilter>(
+        &mut self,
+        envoy_filter: &mut EHF,
+    ) {
+        if !self.per_route_config.is_some() {
+            if let Some(ref per_route_config) = envoy_filter.get_most_specific_route_config() {
+                dbg!("set_per_route_config: {:?}", &per_route_config);
+                let per_route_config = match per_route_config.downcast_ref::<PerRouteConfig>() {
+                    Some(cfg) => cfg,
+                    None => {
+                        eprintln!("set_per_route_config: wrong per route config type: {:?}", per_route_config);
+                        return;
+                    }
+                };
+                self.per_route_config = Some(Box::new(per_route_config.clone()));
+            }
+        }
+    }
+
+    fn get_per_route_config(
+        &self,
+    ) -> Option<&PerRouteConfig> {
+        self.per_route_config.as_ref().map(|config| &**config)
+    }
 }
 
 /// This implements the [`envoy_proxy_dynamic_modules_rust_sdk::HttpFilter`] trait.
@@ -171,29 +197,19 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
         envoy_filter: &mut EHF,
         _end_of_stream: bool,
     ) -> abi::envoy_dynamic_module_type_on_http_filter_request_headers_status {
+        dbg!("on_request_headers() entered");
         if !_end_of_stream {
+            dbg!("on_request_headers: _end_of_stream is false. returning StopIteration");
             return abi::envoy_dynamic_module_type_on_http_filter_request_headers_status::StopIteration;
         }
 
-        let mut setters = self.request_headers_setter.clone();
-        // use the sub route version if appropriate as we dont have valid perroute config today
-        if !self.route_specific.is_empty() {
-            // check filter state for info
-            let route_name_data_option = envoy_filter.get_metadata_string(
-                abi::envoy_dynamic_module_type_metadata_source::Dynamic,
-                "kgateway",
-                "route",
-            );
-            if let Some(route_name_data) = route_name_data_option {
-                // if its there then we should be able to pull the data name
-                let route_name = std::str::from_utf8(route_name_data.as_slice()).unwrap();
-                let route_config = self.route_specific.get(route_name);
-                if let Some(route_config_val) = route_config {
-                    setters = route_config_val.request_headers_setter.clone();
-                }
-            }
-        }
+        self.set_per_route_config(envoy_filter);
+        let setters = match self.get_per_route_config() {
+            Some(config) => &config.request_headers_setter,
+            None => &self.request_headers_setter,
+        };
 
+        dbg!("on_request_headers: setters: {:?}", setters);
         // TODO(nfuden): find someone who knows rust to see if we really need this Hash map for serialization
         let mut headers = HashMap::new();
         for (key, val) in envoy_filter.get_request_headers() {
@@ -205,7 +221,7 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
             headers.insert(key.to_string(), value);
         }
 
-        for (key, value) in &setters {
+        for (key, value) in setters {
             let mut env = self.env.clone();
             env.add_template("temp", value).unwrap();
             let tmpl = env.get_template("temp").unwrap();
@@ -227,6 +243,7 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
         _end_of_stream: bool,
     ) -> abi::envoy_dynamic_module_type_on_http_filter_response_headers_status {
         // TODO(nfuden): find someone who knows rust to see if we really need this Hash map for serialization
+        dbg!("on_response_headers() entered");
         let mut headers = HashMap::new();
         for (key, val) in envoy_filter.get_response_headers() {
             let Some(key) = std::str::from_utf8(key.as_slice()).ok() else {
@@ -247,26 +264,18 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
             request_headers.insert(key.to_string(), value);
         }
 
-        let mut setters = self.response_headers_setter.clone();
-        // use the sub route version if appropriate as we dont have valid perroute config today
-        if !self.route_specific.is_empty() {
-            // check filter state for info
-            let route_name_data_option = envoy_filter.get_metadata_string(
-                abi::envoy_dynamic_module_type_metadata_source::Dynamic,
-                "kgateway",
-                "route",
-            );
-            if let Some(route_name_data) = route_name_data_option {
-                // if its there then we should be able to pull the data name
-                let route_name = std::str::from_utf8(route_name_data.as_slice()).unwrap();
-                let route_config = self.route_specific.get(route_name);
-                if let Some(route_config_val) = route_config {
-                    setters = route_config_val.response_headers_setter.clone();
-                }
-            }
-        }
+        dbg!("on_response_headers: per_route_config: {:?}", &self.per_route_config);
 
-        for (key, value) in &setters {
+        self.set_per_route_config(envoy_filter);
+        let setters = match self.get_per_route_config() {
+            Some(config) => &config.response_headers_setter,
+            None => &self.response_headers_setter,
+        };
+
+        dbg!("on_response_headers: setters: {:?}", setters);
+
+        for (key, value) in setters {
+            dbg!("key: {} value: {}", key, value);
             let mut env = self.env.clone();
             env.add_template("temp", value).unwrap();
             let tmpl = env.get_template("temp").unwrap();
@@ -278,6 +287,7 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
             } else {
                 eprintln!("Error rendering template: {}", rendered.err().unwrap());
             }
+            dbg!("setting response header: key: {} value: {}", key, &rendered_str);
             envoy_filter.set_response_header(key, rendered_str.as_bytes());
         }
         abi::envoy_dynamic_module_type_on_http_filter_response_headers_status::Continue
@@ -320,9 +330,12 @@ mod tests {
                 ),
             ],
             response_headers_setter: vec![("X-Bar".to_string(), "foo".to_string())],
-            route_specific: HashMap::new(),
         };
         let mut filter = filter_conf.new_http_filter(&mut envoy_config);
+
+        envoy_filter.expect_get_most_specific_route_config().returning(|| {
+            None
+        });
 
         envoy_filter.expect_get_request_headers().returning(|| {
             vec![
@@ -421,9 +434,12 @@ mod tests {
                 "{%- if true -%}supersuper{% endif %}".to_string(),
             )],
             response_headers_setter: vec![("X-Bar".to_string(), "foo".to_string())],
-            route_specific: HashMap::new(),
         };
         let mut filter = filter_conf.new_http_filter(&mut envoy_config);
+
+        envoy_filter.expect_get_most_specific_route_config().returning(|| {
+            None
+        });
 
         envoy_filter.expect_get_request_headers().returning(|| {
             vec![
