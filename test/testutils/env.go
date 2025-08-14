@@ -89,6 +89,10 @@ const (
 // ShouldTearDown returns true if any assets that were created before a test (for example Gloo being installed)
 // should be torn down after the test.
 func ShouldTearDown() bool {
+	if !IsEnvDefined(TearDown) {
+		return true
+	}
+
 	return IsEnvTruthy(TearDown)
 }
 
