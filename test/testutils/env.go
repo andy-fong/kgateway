@@ -35,6 +35,15 @@ const (
 	KubeCtx = "KUBE_CTX"
 )
 
+// ShouldTearDown returns true if kgateway installation  should be torn down after a test.
+func ShouldTearDown() bool {
+	if !IsEnvDefined(TearDown) {
+		return true
+	}
+
+	return IsEnvTruthy(TearDown)
+}
+
 // ShouldSkipInstall returns true if kgateway installation and teardown should be skipped.
 func ShouldSkipInstall() bool {
 	return envutils.IsEnvTruthy(SkipInstall)
