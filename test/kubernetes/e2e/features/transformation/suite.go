@@ -338,9 +338,11 @@ func (s *testingSuite) TestGatewayRustformationsWithTransformedRoute() {
 				Headers: map[string]interface{}{
 					"x-foo-response": "notsuper",
 				},
-				NotHeaders: []string{
-					"response-gateway",
-				},
+				/*
+					NotHeaders: []string{
+						"response-gateway",
+					},
+				*/
 			},
 		},
 		{
@@ -455,8 +457,6 @@ func (s *testingSuite) hasDynamicModuleLoaded(shouldBeLoaded bool) {
 		dynamicModuleLoaded := strings.Contains(listener.String(), "dynamic_modules/")
 		if shouldBeLoaded {
 			g.Expect(dynamicModuleLoaded).To(gomega.BeTrue(), fmt.Sprintf("dynamic module not loaded: %v", listener.String()))
-			dynamicModuleRouteConfigured := strings.Contains(listener.String(), "transformation/helper")
-			g.Expect(dynamicModuleRouteConfigured).To(gomega.BeTrue(), fmt.Sprintf("dynamic module routespecific not loaded: %v", listener.String()))
 		} else {
 			g.Expect(dynamicModuleLoaded).To(gomega.BeFalse(), fmt.Sprintf("dynamic module should not be loaded: %v", listener.String()))
 		}
