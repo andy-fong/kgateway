@@ -464,5 +464,6 @@ func (s *testingSuite) hasDynamicModuleLoaded(shouldBeLoaded bool) {
 		WithTimeout(time.Second*20).
 		WithPolling(time.Second).Should(gomega.Succeed(), "failed to get expected load of dynamic modules")
 
+	fmt.Println("hasDynamicModuleLoaded() exiting")
 	closeFwd()
 }

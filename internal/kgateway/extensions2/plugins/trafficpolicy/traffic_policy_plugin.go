@@ -14,6 +14,7 @@ import (
 	localratelimitv3 "github.com/envoyproxy/go-control-plane/envoy/extensions/filters/http/local_ratelimit/v3"
 	envoy_wellknown "github.com/envoyproxy/go-control-plane/pkg/wellknown"
 	"google.golang.org/protobuf/types/known/anypb"
+	"google.golang.org/protobuf/types/known/wrapperspb"
 	skubeclient "istio.io/istio/pkg/config/schema/kubeclient"
 	"istio.io/istio/pkg/kube/kclient"
 	"istio.io/istio/pkg/kube/krt"
@@ -30,6 +31,7 @@ import (
 	extensionsplug "github.com/kgateway-dev/kgateway/v2/internal/kgateway/extensions2/plugin"
 	"github.com/kgateway-dev/kgateway/v2/internal/kgateway/ir"
 	"github.com/kgateway-dev/kgateway/v2/internal/kgateway/plugins"
+	"github.com/kgateway-dev/kgateway/v2/internal/kgateway/utils"
 	"github.com/kgateway-dev/kgateway/v2/internal/kgateway/wellknown"
 	"github.com/kgateway-dev/kgateway/v2/pkg/client/clientset/versioned"
 	"github.com/kgateway-dev/kgateway/v2/pkg/logging"
@@ -210,6 +212,7 @@ func NewPlugin(ctx context.Context, commoncol *common.CommonCollections) extensi
 	registerTypes(commoncol.OurClient)
 
 	useRustformations = commoncol.Settings.UseRustFormations // stash the state of the env setup for rustformation usage
+	useRustformations = true
 	logger.Info("useRustformations: ", strconv.FormatBool(useRustformations))
 
 	col := krt.WrapClient(kclient.NewFiltered[*v1alpha1.TrafficPolicy](
@@ -410,11 +413,18 @@ func (p *trafficPolicyPluginGwPass) HttpFilters(ctx context.Context, fcc ir.Filt
 			// ---------------
 			// | END CLASSIC |
 			// ---------------
+			// TODO: on the rust module side, the deserialization would fail and envoy would reject the config if
+			//       any fields are missing in the json EVEN the filter is disabled, so need this for now untill
+			//       we change the rust module to have default value
+			cfg, _ := utils.MessageToAny(&wrapperspb.StringValue{
+				Value: "{\"request_headers_setter\": [], \"response_headers_setter\": []}",
+			})
 			rustCfg := dynamicmodulesv3.DynamicModuleFilter{
 				DynamicModuleConfig: &exteniondynamicmodulev3.DynamicModuleConfig{
 					Name: "rust_module",
 				},
-				FilterName: "http_simple_mutations",
+				FilterName:   "http_simple_mutations",
+				FilterConfig: cfg,
 			}
 			if p.listenerTransform != nil {
 				// TODO: Add the listener level transform config here?
