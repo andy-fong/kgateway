@@ -397,7 +397,7 @@ ENVOYINIT_SOURCES=$(call get_sources,$(ENVOYINIT_DIR))
 ENVOYINIT_OUTPUT_DIR=$(OUTPUT_DIR)/$(ENVOYINIT_DIR)
 export ENVOYINIT_IMAGE_REPO ?= envoy-wrapper
 
-RUSTFORMATIONS_DIR := ${ENVOYINIT_DIR}/rustformations
+RUSTFORMATIONS_DIR := internal/envoyinit/rustformations
 RUSTFORMATIONS_SRC_FILES := $(shell find $(RUSTFORMATIONS_DIR) -type f)
 
 $(ENVOYINIT_OUTPUT_DIR)/envoyinit-linux-$(GOARCH): $(ENVOYINIT_SOURCES)
