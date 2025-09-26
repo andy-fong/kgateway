@@ -201,7 +201,7 @@ func (i *TestInstallation) UninstallKgateway(ctx context.Context) {
 }
 
 func (i *TestInstallation) UninstallKgatewayCore(ctx context.Context) {
-	if !testutils.ShouldTearDown() {
+	if testutils.ShouldSkipInstall() {
 		return
 	}
 
@@ -218,7 +218,7 @@ func (i *TestInstallation) UninstallKgatewayCore(ctx context.Context) {
 }
 
 func (i *TestInstallation) UninstallKgatewayCRDs(ctx context.Context) {
-	if !testutils.ShouldTearDown() {
+	if testutils.ShouldSkipInstall() {
 		return
 	}
 
