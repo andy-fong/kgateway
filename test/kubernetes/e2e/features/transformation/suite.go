@@ -407,7 +407,7 @@ func (s *testingSuite) TestGatewayRustformationsWithTransformedRoute() {
 			},
 			req: &http.Request{
 				Header: http.Header{
-					"x-foo-bar": []string{"foolen_0"},
+					"request-gateway": []string{"hello"},
 				},
 			},
 		},
@@ -494,18 +494,25 @@ func (s *testingSuite) TestGatewayRustformationsWithTransformedRoute() {
 		*/
 	}
 	for _, tc := range testCases {
-		resp := s.TestInstallation.Assertions.AssertEventualCurlReturnResponse(
-			s.Ctx,
-			defaults.CurlPodExecOpt,
-			append(tc.opts,
-				curl.WithHost(kubeutils.ServiceFQDN(proxyObjectMeta)),
-				curl.WithHostHeader(fmt.Sprintf("example-%s.com", tc.routeName)),
-				curl.WithPort(8080),
-			),
-			tc.resp)
-		req, err := createRequestFromEchoResponse(resp.Body)
-		gomega.Expect(err).NotTo(gomega.HaveOccurred())
-		gomega.Expect(req).To(testmatchers.ContainHeaders(tc.req.Header))
+		s.T().Run(tc.name, func(t *testing.T) {
+			g := gomega.NewWithT(t)
+			resp := s.TestInstallation.Assertions.AssertEventualCurlReturnResponse(
+				s.Ctx,
+				defaults.CurlPodExecOpt,
+				append(tc.opts,
+					curl.WithHost(kubeutils.ServiceFQDN(proxyObjectMeta)),
+					curl.WithHostHeader(fmt.Sprintf("example-%s.com", tc.routeName)),
+					curl.WithPort(8080),
+				),
+				tc.resp)
+			if resp.StatusCode == http.StatusOK {
+				req, err := createRequestFromEchoResponse(resp.Body)
+				g.Expect(err).NotTo(gomega.HaveOccurred())
+				g.Expect(req).To(testmatchers.ContainHeaders(tc.req.Header))
+			} else {
+				resp.Body.Close()
+			}
+		})
 	}
 }
 

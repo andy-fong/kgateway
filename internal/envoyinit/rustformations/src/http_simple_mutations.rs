@@ -131,26 +131,38 @@ fn substring(input: &str, args: Rest<String>) -> String {
 }
 
 fn header(state: &State, key: &str) -> String {
+    dbg!("header() callback");
     let headers = state.lookup("headers");
     let Some(headers) = headers else {
+        dbg!("no headers!");
         return "".to_string();
     };
 
     let Some(header_map) = <HashMap<String, String>>::deserialize(headers.clone()).ok() else {
+        dbg!("failed to deserialized headers!");
         return "".to_string();
     };
-    header_map.get(key).cloned().unwrap_or_default()
+    dbg!("key: {:?}", key);
+    dbg!("header_map: {:?}", &header_map);
+    let value = header_map.get(key).cloned().unwrap_or_default();
+    dbg!("value: {:?}", &value);
+    return value;
 }
 
 fn request_header(state: &State, key: &str) -> String {
+    dbg!("request_header() callback");
     let headers = state.lookup("request_headers");
     let Some(headers) = headers else {
+        dbg!("no request_headers!");
         return "".to_string();
     };
 
     let Some(header_map) = <HashMap<String, String>>::deserialize(headers.clone()).ok() else {
+        dbg!("failed to deserialized request_headers!");
         return "".to_string();
     };
+    dbg!("key: {:?}", key);
+    dbg!("request header_map: {:?}", &header_map);
     header_map.get(key).cloned().unwrap_or_default()
 }
 
@@ -188,28 +200,17 @@ impl Filter {
     ) -> Option<&PerRouteConfig> {
         self.per_route_config.as_ref().map(|config| &**config)
     }
-}
 
-/// This implements the [`envoy_proxy_dynamic_modules_rust_sdk::HttpFilter`] trait.
-impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
-    fn on_request_headers(
-        &mut self,
+    fn transform_request_headers<EHF: EnvoyHttpFilter>(
+        &self,
         envoy_filter: &mut EHF,
-        _end_of_stream: bool,
-    ) -> abi::envoy_dynamic_module_type_on_http_filter_request_headers_status {
-        dbg!("on_request_headers() entered");
-        if !_end_of_stream {
-            dbg!("on_request_headers: _end_of_stream is false. returning StopIteration");
-            return abi::envoy_dynamic_module_type_on_http_filter_request_headers_status::StopIteration;
-        }
-
-        self.set_per_route_config(envoy_filter);
+    ) {
         let setters = match self.get_per_route_config() {
             Some(config) => &config.request_headers_setter,
             None => &self.request_headers_setter,
         };
 
-        dbg!("on_request_headers: setters: {:?}", setters);
+        dbg!("transform_request_headers: setters: {:?}", setters);
         // TODO(nfuden): find someone who knows rust to see if we really need this Hash map for serialization
         let mut headers = HashMap::new();
         for (key, val) in envoy_filter.get_request_headers() {
@@ -225,16 +226,52 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
             let mut env = self.env.clone();
             env.add_template("temp", value).unwrap();
             let tmpl = env.get_template("temp").unwrap();
-            let rendered = tmpl.render(context!(headers => headers));
+            let rendered = tmpl.render(context!(headers => headers, request_headers => headers));
             let mut rendered_str = "".to_string();
             if let Ok(rendered_val) = rendered {
                 rendered_str = rendered_val;
+                dbg!("rendered_str: {:?}", &rendered_str);
             } else {
                 eprintln!("Error rendering template: {}", rendered.err().unwrap());
             }
+            dbg!("setting request header: key: {:?} value: {:?}", key, &rendered_str);
             envoy_filter.set_request_header(key, rendered_str.as_bytes());
         }
+    }
+}
+
+/// This implements the [`envoy_proxy_dynamic_modules_rust_sdk::HttpFilter`] trait.
+impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
+    fn on_request_headers(
+        &mut self,
+        envoy_filter: &mut EHF,
+        _end_of_stream: bool,
+    ) -> abi::envoy_dynamic_module_type_on_http_filter_request_headers_status {
+        dbg!("on_request_headers() entered");
+        if !_end_of_stream {
+            // TODO: this here always buffer the request body, need to suppport body passthrough
+            dbg!("on_request_headers: _end_of_stream is false. returning StopIteration");
+            return abi::envoy_dynamic_module_type_on_http_filter_request_headers_status::StopIteration;
+        }
+
+        self.set_per_route_config(envoy_filter);
+        self.transform_request_headers(envoy_filter);
         abi::envoy_dynamic_module_type_on_http_filter_request_headers_status::Continue
+    }
+
+    fn on_request_body(
+        &mut self,
+        envoy_filter: &mut EHF,
+        end_of_stream: bool,
+    ) -> abi::envoy_dynamic_module_type_on_http_filter_request_body_status {
+        dbg!("on_request_body() entered");
+        if !end_of_stream {
+            return abi::envoy_dynamic_module_type_on_http_filter_request_body_status::StopIterationAndBuffer
+        }
+
+        self.set_per_route_config(envoy_filter);
+        self.transform_request_headers(envoy_filter);
+        return abi::envoy_dynamic_module_type_on_http_filter_request_body_status::Continue;
     }
 
     fn on_response_headers(
