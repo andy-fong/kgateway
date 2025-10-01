@@ -212,6 +212,14 @@ func (s *testingSuite) TestGatewayWithTransformedRoute() {
 			req: &http.Request{
 				Header: http.Header{
 					"x-foo-bar": []string{"foolen_5"},
+
+					// TODO: looks like the way we set up transformation targeting gateway, we are
+					//       also using RouteTransformation instead of FilterTransformation and it's
+					//       set , so it's set at the route table level, so if there is a more specific
+					//       transformation (eg in vhost or prefic match), the gateway attached transformation
+					//       will not apply.
+					//       should make sure this header is absence
+					//	"request-gateway": []string{"hello"},
 				},
 			},
 		},
@@ -248,7 +256,7 @@ func (s *testingSuite) TestGatewayWithTransformedRoute() {
 					"from-incoming": "key_level_myinnervalue",
 				},
 			},
-			// For this test, there is a resposne body transformation setup which extracts just the headers field
+			// For this test, there is a response body transformation setup which extracts just the headers field
 			// It messes up creating a request from the normal echo response.
 			// TODO: need to account for this
 			req: &http.Request{
@@ -258,9 +266,10 @@ func (s *testingSuite) TestGatewayWithTransformedRoute() {
 			},
 		},
 		{
-			// This test looks really strange. I assume the default is parse the body as string
-			// which I thought is no parsing. Why does this return 400???
-			name:      "dont pull info if we dont parse json", // shows we parse the body as json
+			// The default for Body parsing is AsString which translate to body passthrough (no buffering in envoy)
+			// For this test, the response header transformation is set to try to use the `headers` field in the response
+			// json body, because the body is never parse, so `headers` is undefine and envoy returns 400 response
+			name:      "dont pull info if we dont parse json",
 			routeName: "route-for-body",
 			opts: []curl.Option{
 				curl.WithBody(`{"mykey": {"myinnerkey": "myinnervalue"}}`),
