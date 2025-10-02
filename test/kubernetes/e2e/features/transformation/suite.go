@@ -174,7 +174,7 @@ func (s *testingSuite) TestGatewayWithTransformedRoute() {
 		routeName string
 		opts      []curl.Option
 		resp      *testmatchers.HttpResponse
-		req       *http.Request
+		req       *testmatchers.HttpRequest
 	}{
 		{
 			name:      "basic-gateway-attached",
@@ -188,9 +188,9 @@ func (s *testingSuite) TestGatewayWithTransformedRoute() {
 					"x-foo-response",
 				},
 			},
-			req: &http.Request{
-				Header: http.Header{
-					"request-gateway": []string{"hello"},
+			req: &testmatchers.HttpRequest{
+				Headers: map[string]interface{}{
+					"request-gateway": "hello",
 				},
 			},
 		},
@@ -209,17 +209,17 @@ func (s *testingSuite) TestGatewayWithTransformedRoute() {
 					"response-gateway",
 				},
 			},
-			req: &http.Request{
-				Header: http.Header{
-					"x-foo-bar": []string{"foolen_5"},
-
-					// TODO: looks like the way we set up transformation targeting gateway, we are
-					//       also using RouteTransformation instead of FilterTransformation and it's
-					//       set , so it's set at the route table level, so if there is a more specific
-					//       transformation (eg in vhost or prefic match), the gateway attached transformation
-					//       will not apply.
-					//       should make sure this header is absence
-					//	"request-gateway": []string{"hello"},
+			req: &testmatchers.HttpRequest{
+				Headers: map[string]interface{}{
+					"x-foo-bar": "foolen_5",
+				},
+				NotHeaders: []string{
+					// looks like the way we set up transformation targeting gateway, we are
+					// also using RouteTransformation instead of FilterTransformation and it's
+					// set , so it's set at the route table level and if there is a more specific
+					// transformation (eg in vhost or prefix match), the gateway attached transformation
+					// will not apply. Make sure it's not there.
+					"request-gateway",
 				},
 			},
 		},
@@ -227,7 +227,7 @@ func (s *testingSuite) TestGatewayWithTransformedRoute() {
 			name:      "conditional set by request header", // inja and the request_header function in use
 			routeName: "headers",
 			opts: []curl.Option{
-				curl.WithBody("hello"),
+				curl.WithBody("hello-world"),
 				curl.WithHeader("x-add-bar", "super"),
 			},
 			resp: &testmatchers.HttpResponse{
@@ -236,9 +236,17 @@ func (s *testingSuite) TestGatewayWithTransformedRoute() {
 					"x-foo-response": "supersupersuper",
 				},
 			},
-			req: &http.Request{
-				Header: http.Header{
-					"x-foo-bar": []string{"foolen_5"},
+			req: &testmatchers.HttpRequest{
+				Headers: map[string]interface{}{
+					"x-foo-bar": "foolen_11",
+				},
+				NotHeaders: []string{
+					// looks like the way we set up transformation targeting gateway, we are
+					// also using RouteTransformation instead of FilterTransformation and it's
+					// set , so it's set at the route table level and if there is a more specific
+					// transformation (eg in vhost or prefix match), the gateway attached transformation
+					// will not apply. Make sure it's not there.
+					"request-gateway",
 				},
 			},
 		},
@@ -256,12 +264,11 @@ func (s *testingSuite) TestGatewayWithTransformedRoute() {
 					"from-incoming": "key_level_myinnervalue",
 				},
 			},
-			// For this test, there is a response body transformation setup which extracts just the headers field
-			// It messes up creating a request from the normal echo response.
-			// TODO: need to account for this
-			req: &http.Request{
-				Header: http.Header{
-					"X-Transformed-Incoming": []string{"level_myinnervalue"},
+			// Note: for this test, there is a response body transformation setup which extracts just the headers field
+			// When we create the Request Object from the echo response, we accounted for that
+			req: &testmatchers.HttpRequest{
+				Headers: map[string]interface{}{
+					"X-Transformed-Incoming": "level_myinnervalue",
 				},
 			},
 		},
@@ -281,7 +288,6 @@ func (s *testingSuite) TestGatewayWithTransformedRoute() {
 					"x-how-great",
 				},
 			},
-			req: &http.Request{},
 		},
 		{
 			name:      "dont pull json info if not json", // shows we parse the body as json
@@ -292,7 +298,6 @@ func (s *testingSuite) TestGatewayWithTransformedRoute() {
 			resp: &testmatchers.HttpResponse{
 				StatusCode: http.StatusBadRequest, // transformation should choke
 			},
-			req: &http.Request{},
 		},
 	}
 	for _, tc := range testCases {
@@ -310,7 +315,7 @@ func (s *testingSuite) TestGatewayWithTransformedRoute() {
 			if resp.StatusCode == http.StatusOK {
 				req, err := createRequestFromEchoResponse(resp.Body)
 				g.Expect(err).NotTo(gomega.HaveOccurred())
-				g.Expect(req).To(testmatchers.ContainHeaders(tc.req.Header))
+				g.Expect(req).To(testmatchers.HaveHttpRequest(tc.req))
 			} else {
 				resp.Body.Close()
 			}
