@@ -1,13 +1,9 @@
 package transformation
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
-	"net/url"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -33,6 +29,7 @@ import (
 	"github.com/kgateway-dev/kgateway/v2/test/kubernetes/e2e"
 	"github.com/kgateway-dev/kgateway/v2/test/kubernetes/e2e/defaults"
 	"github.com/kgateway-dev/kgateway/v2/test/kubernetes/e2e/tests/base"
+	"github.com/kgateway-dev/kgateway/v2/test/kubernetes/testutils/helper"
 )
 
 var _ e2e.NewSuiteFunc = NewTestingSuite
@@ -71,83 +68,6 @@ var (
 // testingSuite is a suite of basic routing / "happy path" tests
 type testingSuite struct {
 	*base.BaseTestingSuite
-}
-
-type echoResponse struct {
-	Path    string              `json:"path"`
-	Host    string              `json:"host"`
-	Method  string              `json:"method"`
-	Proto   string              `json:"proto"`
-	Headers map[string][]string `json:"headers"`
-	// other fields like namespace, ingress, service, pod ignored
-}
-
-// ToHTTPRequest reconstructs an http.Request from the EchoResponse
-func (er *echoResponse) ToHTTPRequest() (*http.Request, error) {
-	// Construct a URL (you may want to prepend scheme, default http://)
-	u := &url.URL{
-		Scheme: "http",
-		Host:   er.Host,
-		Path:   er.Path,
-	}
-
-	// Create a body if Content-Length > 0 (dummy body here)
-	var body io.ReadCloser
-	if cl, ok := er.Headers["Content-Length"]; ok && len(cl) > 0 && cl[0] != "0" {
-		body = io.NopCloser(bytes.NewBuffer(make([]byte, 0)))
-	}
-
-	// Build request
-	req := &http.Request{
-		Method: er.Method,
-		URL:    u,
-		Host:   er.Host,
-		Header: http.Header{},
-		Body:   body,
-		Proto:  er.Proto,
-	}
-
-	// Add headers
-	for k, v := range er.Headers {
-		for _, val := range v {
-			req.Header.Add(k, val)
-		}
-	}
-
-	return req, nil
-}
-
-func createRequestFromEchoResponse(r io.ReadCloser) (*http.Request, error) {
-	bytes, err := io.ReadAll(r)
-	if err != nil {
-		return nil, err
-	}
-	r.Close()
-
-	//	fmt.Printf("body:\n%s\n", string(bytes))
-	var response echoResponse
-	if err := json.Unmarshal(bytes, &response); err != nil {
-		return nil, err
-	}
-
-	if len(response.Headers) == 0 {
-		// some tests has response transformation that extract just the headers field from
-		// the original echo response, so just put parse that as a map of key and value and
-		// put that into Headers
-		var m map[string][]string
-		if err := json.Unmarshal(bytes, &m); err != nil {
-			return nil, err
-		}
-
-		if response.Headers == nil {
-			response.Headers = make(map[string][]string)
-		}
-		for k, v := range m {
-			response.Headers[k] = v
-		}
-
-	}
-	return response.ToHTTPRequest()
 }
 
 func NewTestingSuite(ctx context.Context, testInst *e2e.TestInstallation) suite.TestingSuite {
@@ -313,7 +233,7 @@ func (s *testingSuite) TestGatewayWithTransformedRoute() {
 				),
 				tc.resp)
 			if resp.StatusCode == http.StatusOK {
-				req, err := createRequestFromEchoResponse(resp.Body)
+				req, err := helper.CreateRequestFromEchoResponse(resp.Body)
 				g.Expect(err).NotTo(gomega.HaveOccurred())
 				g.Expect(req).To(testmatchers.HaveHttpRequest(tc.req))
 			} else {
@@ -511,7 +431,7 @@ func (s *testingSuite) TestGatewayRustformationsWithTransformedRoute() {
 				),
 				tc.resp)
 			if resp.StatusCode == http.StatusOK {
-				req, err := createRequestFromEchoResponse(resp.Body)
+				req, err := helper.CreateRequestFromEchoResponse(resp.Body)
 				g.Expect(err).NotTo(gomega.HaveOccurred())
 				g.Expect(req).To(testmatchers.ContainHeaders(tc.req.Header))
 			} else {
