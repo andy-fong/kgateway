@@ -398,7 +398,8 @@ ENVOYINIT_OUTPUT_DIR=$(OUTPUT_DIR)/$(ENVOYINIT_DIR)
 export ENVOYINIT_IMAGE_REPO ?= envoy-wrapper
 
 RUSTFORMATIONS_DIR := internal/envoyinit/rustformations
-RUSTFORMATIONS_SRC_FILES := $(shell find $(RUSTFORMATIONS_DIR) -type f)
+# find all the find under the rustformation directory but exclude the target directory
+RUSTFORMATIONS_SRC_FILES := $(shell find $(RUSTFORMATIONS_DIR) -type d -name target -prune -o -type f)
 
 $(ENVOYINIT_OUTPUT_DIR)/envoyinit-linux-$(GOARCH): $(ENVOYINIT_SOURCES)
 	$(GO_BUILD_FLAGS) GOOS=linux go build -ldflags='$(LDFLAGS)' -gcflags='$(GCFLAGS)' -o $@ ./cmd/envoyinit/...

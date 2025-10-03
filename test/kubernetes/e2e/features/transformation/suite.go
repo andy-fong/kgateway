@@ -121,7 +121,8 @@ func NewTestingSuite(ctx context.Context, testInst *e2e.TestInstallation) suite.
 				resp: &testmatchers.HttpResponse{
 					StatusCode: http.StatusOK,
 					Headers: map[string]interface{}{
-						"x-foo-response": "notsuper",
+						"x-foo-response":        "notsuper",
+						"x-foo-response-status": "200",
 					},
 					NotHeaders: []string{
 						"response-gateway",
@@ -129,7 +130,8 @@ func NewTestingSuite(ctx context.Context, testInst *e2e.TestInstallation) suite.
 				},
 				req: &testmatchers.HttpRequest{
 					Headers: map[string]interface{}{
-						"x-foo-bar": "foolen_5",
+						"x-foo-bar":  "foolen_5",
+						"x-foo-bar2": "foolen_5",
 					},
 					NotHeaders: []string{
 						// looks like the way we set up transformation targeting gateway, we are
@@ -151,12 +153,14 @@ func NewTestingSuite(ctx context.Context, testInst *e2e.TestInstallation) suite.
 				resp: &testmatchers.HttpResponse{
 					StatusCode: http.StatusOK,
 					Headers: map[string]interface{}{
-						"x-foo-response": "supersupersuper",
+						"x-foo-response":        "supersupersuper",
+						"x-foo-response-status": "200",
 					},
 				},
 				req: &testmatchers.HttpRequest{
 					Headers: map[string]interface{}{
-						"x-foo-bar": "foolen_11",
+						"x-foo-bar":  "foolen_11",
+						"x-foo-bar2": "foolen_11",
 					},
 					NotHeaders: []string{
 						// looks like the way we set up transformation targeting gateway, we are
