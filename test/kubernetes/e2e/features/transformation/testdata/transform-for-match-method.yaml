@@ -10,11 +10,10 @@ spec:
     - "example-match.com"
   rules:
     - matches:
-        - method: GET 
+        - method: GET
       backendRefs:
         - name: simple-svc
           port: 8080
-      
 ---
 apiVersion: gateway.kgateway.dev/v1alpha1
 kind: TrafficPolicy

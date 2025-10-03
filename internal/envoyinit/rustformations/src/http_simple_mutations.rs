@@ -21,12 +21,10 @@ impl PerRouteConfig {
         let per_route_config: PerRouteConfig = match serde_json::from_str(config) {
             Ok(cfg) => cfg,
             Err(err) => {
-                // TODO(nfuden): Dont panic if there is incorrect configuration
-                eprintln!("{}:{} Error parsing per route config: {config} {err}", file!(), line!());
+                eprintln!("Error parsing per route config: {config} {err}");
                 return None;
             }
         };
-        dbg!("per_route_config: {:?}", &per_route_config);
         Some(per_route_config)
     }
 }
@@ -54,7 +52,7 @@ impl FilterConfig {
             Ok(cfg) => cfg,
             Err(err) => {
                 // TODO(nfuden): Dont panic if there is incorrect configuration
-                eprintln!("{}:{} Error parsing filter config: {filter_config} {err}", file!(), line!());
+                eprintln!("Error parsing filter config: {filter_config} {err}");
                 return None;
             }
         };
@@ -131,38 +129,27 @@ fn substring(input: &str, args: Rest<String>) -> String {
 }
 
 fn header(state: &State, key: &str) -> String {
-    dbg!("header() callback");
     let headers = state.lookup("headers");
     let Some(headers) = headers else {
-        dbg!("no headers!");
         return "".to_string();
     };
 
     let Some(header_map) = <HashMap<String, String>>::deserialize(headers.clone()).ok() else {
-        dbg!("failed to deserialized headers!");
         return "".to_string();
     };
-    dbg!("key: {:?}", key);
-    dbg!("header_map: {:?}", &header_map);
     let value = header_map.get(key).cloned().unwrap_or_default();
-    dbg!("value: {:?}", &value);
     return value;
 }
 
 fn request_header(state: &State, key: &str) -> String {
-    dbg!("request_header() callback");
     let headers = state.lookup("request_headers");
     let Some(headers) = headers else {
-        dbg!("no request_headers!");
         return "".to_string();
     };
 
     let Some(header_map) = <HashMap<String, String>>::deserialize(headers.clone()).ok() else {
-        dbg!("failed to deserialized request_headers!");
         return "".to_string();
     };
-    dbg!("key: {:?}", key);
-    dbg!("request header_map: {:?}", &header_map);
     header_map.get(key).cloned().unwrap_or_default()
 }
 
@@ -181,8 +168,7 @@ impl Filter {
         envoy_filter: &mut EHF,
     ) {
         if !self.per_route_config.is_some() {
-            if let Some(ref per_route_config) = envoy_filter.get_most_specific_route_config() {
-                dbg!("set_per_route_config: {:?}", &per_route_config);
+            if let Some(per_route_config) = envoy_filter.get_most_specific_route_config().as_ref() {
                 let per_route_config = match per_route_config.downcast_ref::<PerRouteConfig>() {
                     Some(cfg) => cfg,
                     None => {
@@ -210,7 +196,6 @@ impl Filter {
             None => &self.request_headers_setter,
         };
 
-        dbg!("transform_request_headers: setters: {:?}", setters);
         // TODO(nfuden): find someone who knows rust to see if we really need this Hash map for serialization
         let mut headers = HashMap::new();
         for (key, val) in envoy_filter.get_request_headers() {
@@ -230,11 +215,9 @@ impl Filter {
             let mut rendered_str = "".to_string();
             if let Ok(rendered_val) = rendered {
                 rendered_str = rendered_val;
-                dbg!("rendered_str: {:?}", &rendered_str);
             } else {
                 eprintln!("Error rendering template: {}", rendered.err().unwrap());
             }
-            dbg!("setting request header: key: {:?} value: {:?}", key, &rendered_str);
             envoy_filter.set_request_header(key, rendered_str.as_bytes());
         }
     }
@@ -247,10 +230,11 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
         envoy_filter: &mut EHF,
         _end_of_stream: bool,
     ) -> abi::envoy_dynamic_module_type_on_http_filter_request_headers_status {
-        dbg!("on_request_headers() entered");
+        // TODO: need to test if we get called even if there is no transformation setting
+        //       if yes, we need to short circuit here and return Continue
         if !_end_of_stream {
-            // TODO: this here always buffer the request body, need to suppport body passthrough
-            dbg!("on_request_headers: _end_of_stream is false. returning StopIteration");
+            // TODO: this here always stop iteration to wait for the full request body,
+            //       need to support body passthrough
             return abi::envoy_dynamic_module_type_on_http_filter_request_headers_status::StopIteration;
         }
 
@@ -264,8 +248,13 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
         envoy_filter: &mut EHF,
         end_of_stream: bool,
     ) -> abi::envoy_dynamic_module_type_on_http_filter_request_body_status {
-        dbg!("on_request_body() entered");
+        // TODO: need to test if we get called even if there is no transformation setting
+        //       if yes, we need to short circuit here and return Continue
         if !end_of_stream {
+            // TODO: Technically, we don't need to buffer the body yet as we don't support parsing the body now
+            //       but it will be coming next. This is mimicking the C++ transformation filter behavior to 
+            //       always buffer the request body by default unless passthrough is set. Will revisit and consider
+            //       if this is the desired behavior when we implement parsing the body
             return abi::envoy_dynamic_module_type_on_http_filter_request_body_status::StopIterationAndBuffer
         }
 
@@ -280,7 +269,6 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
         _end_of_stream: bool,
     ) -> abi::envoy_dynamic_module_type_on_http_filter_response_headers_status {
         // TODO(nfuden): find someone who knows rust to see if we really need this Hash map for serialization
-        dbg!("on_response_headers() entered");
         let mut headers = HashMap::new();
         for (key, val) in envoy_filter.get_response_headers() {
             let Some(key) = std::str::from_utf8(key.as_slice()).ok() else {
@@ -301,18 +289,13 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
             request_headers.insert(key.to_string(), value);
         }
 
-        dbg!("on_response_headers: per_route_config: {:?}", &self.per_route_config);
-
         self.set_per_route_config(envoy_filter);
         let setters = match self.get_per_route_config() {
             Some(config) => &config.response_headers_setter,
             None => &self.response_headers_setter,
         };
 
-        dbg!("on_response_headers: setters: {:?}", setters);
-
         for (key, value) in setters {
-            dbg!("key: {} value: {}", key, value);
             let mut env = self.env.clone();
             env.add_template("temp", value).unwrap();
             let tmpl = env.get_template("temp").unwrap();
@@ -324,7 +307,6 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
             } else {
                 eprintln!("Error rendering template: {}", rendered.err().unwrap());
             }
-            dbg!("setting response header: key: {} value: {}", key, &rendered_str);
             envoy_filter.set_response_header(key, rendered_str.as_bytes());
         }
         abi::envoy_dynamic_module_type_on_http_filter_response_headers_status::Continue

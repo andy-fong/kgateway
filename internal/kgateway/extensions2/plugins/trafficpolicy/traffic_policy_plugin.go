@@ -2,7 +2,6 @@ package trafficpolicy
 
 import (
 	"context"
-	"strconv"
 	"time"
 
 	envoyroutev3 "github.com/envoyproxy/go-control-plane/envoy/config/route/v3"
@@ -191,16 +190,16 @@ type trafficPolicyPluginGwPass struct {
 	ir.UnimplementedProxyTranslationPass
 
 	setTransformationInChain map[string]bool // TODO(nfuden): make this multi stage
-	listenerTransform     *transformationpb.RouteTransformations
-	localRateLimitInChain map[string]*localratelimitv3.LocalRateLimit
-	extAuthPerProvider    ProviderNeededMap
-	extProcPerProvider    ProviderNeededMap
-	rateLimitPerProvider  ProviderNeededMap
-	rbacInChain           map[string]*envoyrbacv3.RBAC
-	corsInChain           map[string]*corsv3.Cors
-	csrfInChain           map[string]*envoy_csrf_v3.CsrfPolicy
-	headerMutationInChain map[string]*header_mutationv3.HeaderMutationPerRoute
-	bufferInChain         map[string]*bufferv3.Buffer
+	listenerTransform        *transformationpb.RouteTransformations
+	localRateLimitInChain    map[string]*localratelimitv3.LocalRateLimit
+	extAuthPerProvider       ProviderNeededMap
+	extProcPerProvider       ProviderNeededMap
+	rateLimitPerProvider     ProviderNeededMap
+	rbacInChain              map[string]*envoyrbacv3.RBAC
+	corsInChain              map[string]*corsv3.Cors
+	csrfInChain              map[string]*envoy_csrf_v3.CsrfPolicy
+	headerMutationInChain    map[string]*header_mutationv3.HeaderMutationPerRoute
+	bufferInChain            map[string]*bufferv3.Buffer
 }
 
 var _ ir.ProxyTranslationPass = &trafficPolicyPluginGwPass{}
@@ -224,8 +223,9 @@ func NewPlugin(ctx context.Context, commoncol *collections.CommonCollections, me
 	registerTypes(commoncol.OurClient)
 
 	useRustformations = commoncol.Settings.UseRustFormations // stash the state of the env setup for rustformation usage
-	// useRustformations = true
-	logger.Info("useRustformations: ", strconv.FormatBool(useRustformations))
+	if useRustformations {
+		logger.Info("Transformation is using Rust Dynamic Module.")
+	}
 
 	col := krt.WrapClient(kclient.NewFiltered[*v1alpha1.TrafficPolicy](
 		commoncol.Client,
@@ -550,10 +550,8 @@ func (p *trafficPolicyPluginGwPass) handlePolicies(
 	spec trafficPolicySpecIr,
 ) {
 	if useRustformations {
-		logger.Info("using rustformation for route config")
 		p.handleRustTransformation(fcn, typedFilterConfig, spec.rustformation)
 	} else {
-		logger.Info("NOT using rustformation for route config")
 		p.handleTransformation(fcn, typedFilterConfig, spec.transformation)
 	}
 
