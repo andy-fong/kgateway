@@ -5,9 +5,11 @@ use minijinja::{context, Environment, State};
 #[cfg(test)]
 use mockall::*;
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize};
 use std::collections::HashMap;
+use transformations::PerRouteConfig;
 
+/*
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct PerRouteConfig {
     #[serde(default)]
@@ -60,7 +62,15 @@ impl FilterConfig {
     }
 }
 
-impl<EC: EnvoyHttpFilterConfig, EHF: EnvoyHttpFilter> HttpFilterConfig<EC, EHF> for FilterConfig {
+ */
+
+pub struct LocalFilterConfig(pub transformations::FilterConfig);
+impl LocalFilterConfig {
+    pub fn new(filter_config: &str) -> Option<Self> {
+        Some(Self(transformations::FilterConfig::new(filter_config)?))
+    }
+}
+impl<EC: EnvoyHttpFilterConfig, EHF: EnvoyHttpFilter> HttpFilterConfig<EC, EHF> for LocalFilterConfig {
     /// This is called for each new HTTP filter.
     fn new_http_filter(&mut self, _envoy: &mut EC) -> Box<dyn HttpFilter<EHF>> {
         let mut env = Environment::new();
@@ -101,9 +111,9 @@ impl<EC: EnvoyHttpFilterConfig, EHF: EnvoyHttpFilter> HttpFilterConfig<EC, EHF> 
         // specific.extend(self.route_specific.into_iter());
 
         Box::new(Filter {
-            request_headers_setter: self.request_headers_setter.clone(),
+            request_headers_setter: self.0.request_headers_setter.clone(),
             // request_headers_extractions: self.request_headers_extractions.clone(),
-            response_headers_setter: self.response_headers_setter.clone(),
+            response_headers_setter: self.0.response_headers_setter.clone(),
             per_route_config: None,
             env,
         })
@@ -323,7 +333,7 @@ mod tests {
         // construct the filter config
         // most upstream tests start with the filter itself but we are tryign to add heavier logic
         // to the config factory strat rather than running it on header calls
-        let mut filter_conf = FilterConfig {
+        let mut filter_conf = LocalFilterConfig {
             request_headers_setter: vec![
                 (
                     "X-substring".to_string(),
@@ -441,7 +451,7 @@ mod tests {
         // construct the filter config
         // most upstream tests start with the filter itself but we are tryign to add heavier logic
         // to the config factory strat rather than running it on header calls
-        let mut filter_conf = FilterConfig {
+        let mut filter_conf = LocalFilterConfig {
             request_headers_setter: vec![(
                 "X-if-truth".to_string(),
                 "{%- if true -%}supersuper{% endif %}".to_string(),
