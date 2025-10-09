@@ -1,68 +1,11 @@
 use envoy_proxy_dynamic_modules_rust_sdk::*;
-use minijinja::value::Rest;
-use minijinja::{context, Environment, State};
+use minijinja::{context, Environment};
 
 #[cfg(test)]
 use mockall::*;
 
-use serde::{Deserialize};
 use std::collections::HashMap;
 use transformations::PerRouteConfig;
-
-/*
-#[derive(Serialize, Deserialize, Clone, Debug)]
-pub struct PerRouteConfig {
-    #[serde(default)]
-    request_headers_setter: Vec<(String, String)>,
-    #[serde(default)]
-    response_headers_setter: Vec<(String, String)>,
-}
-
-impl PerRouteConfig {
-    pub fn new(config: &str) -> Option<Self> {
-        let per_route_config: PerRouteConfig = match serde_json::from_str(config) {
-            Ok(cfg) => cfg,
-            Err(err) => {
-                eprintln!("Error parsing per route config: {config} {err}");
-                return None;
-            }
-        };
-        Some(per_route_config)
-    }
-}
-
-/// This implements the [`envoy_proxy_dynamic_modules_rust_sdk::HttpFilterConfig`] trait.
-///
-/// The trait corresponds to a Envoy filter chain configuration.
-
-#[derive(Serialize, Deserialize, Debug)]
-pub struct FilterConfig {
-    #[serde(default)]
-    request_headers_setter: Vec<(String, String)>,
-    #[serde(default)]
-    response_headers_setter: Vec<(String, String)>,
-}
-
-impl FilterConfig {
-    /// This is the constructor for the [`FilterConfig`].
-    ///
-    /// filter_config is the filter config from the Envoy config here:
-    /// https://www.envoyproxy.io/docs/envoy/latest/api-v3/extensions/dynamic_modules/v3/dynamic_modules.proto#envoy-v3-api-msg-extensions-dynamic-modules-v3-dynamicmoduleconfig
-    pub fn new(filter_config: &str) -> Option<Self> {
-        let filter_config: FilterConfig = match serde_json::from_str(filter_config) {
-            // TODO(nfuden): Handle optional configuration entries more clenaly. Currently all values are required to be present
-            Ok(cfg) => cfg,
-            Err(err) => {
-                // TODO(nfuden): Dont panic if there is incorrect configuration
-                eprintln!("Error parsing filter config: {filter_config} {err}");
-                return None;
-            }
-        };
-        Some(filter_config)
-    }
-}
-
- */
 
 pub struct LocalFilterConfig(pub transformations::FilterConfig);
 impl LocalFilterConfig {
@@ -70,96 +13,20 @@ impl LocalFilterConfig {
         Some(Self(transformations::FilterConfig::new(filter_config)?))
     }
 }
-impl<EC: EnvoyHttpFilterConfig, EHF: EnvoyHttpFilter> HttpFilterConfig<EC, EHF> for LocalFilterConfig {
+
+impl<EC: EnvoyHttpFilterConfig, EHF: EnvoyHttpFilter> HttpFilterConfig<EC, EHF>
+    for LocalFilterConfig
+{
     /// This is called for each new HTTP filter.
     fn new_http_filter(&mut self, _envoy: &mut EC) -> Box<dyn HttpFilter<EHF>> {
-        let mut env = Environment::new();
-
-        // could add in line like this if we wanted to
-        // env.add_function("substring", |input: &str, args: Rest<String>| {
-
-        env.add_function("substring", substring);
-
-        // !! Standard string manipulation
-        // env.add_function("trim", trim);
-        // env.add_function("base64_encode", base64_encode);
-        // env.add_function("base64url_encode", base64url_encode);
-        // env.add_function("base64_decode", base64_decode);
-        // env.add_function("base64url_decode", base64url_decode);
-        // env.add_function("replace_with_random", replace_with_random);
-        // env.add_function("raw_string", raw_string);
-        //        env.add_function("word_count", word_count);
-
-        // !! Envoy context accessors
-        env.add_function("header", header);
-        env.add_function("request_header", request_header);
-        // env.add_function("extraction", extraction);
-        // env.add_function("body", body);
-        // env.add_function("dynamic_metadata", dynamic_metadata);
-
-        // !! Datasource Puller needed
-        // env.add_function("data_source", data_source);
-
-        // !! Requires being in an upstream filter
-        // env.add_function("host_metadata", host_metadata);
-        // env.add_function("cluster_metadata", cluster_metadata);
-
-        // !! Possibly not relevant old inja internal debug stuff
-        // env.add_function("context", context);
-        // env.add_function("env", env);
-
-        // specific.extend(self.route_specific.into_iter());
-
         Box::new(Filter {
             request_headers_setter: self.0.request_headers_setter.clone(),
             // request_headers_extractions: self.request_headers_extractions.clone(),
             response_headers_setter: self.0.response_headers_setter.clone(),
             per_route_config: None,
-            env,
+            env: transformations::jinja::new_jinja_env(),
         })
     }
-}
-
-// substring can be called with either two or three arguments --
-// the first argument is the string to be modified, the second is the start position
-// of the substring, and the optional third argument is the length of the substring.
-// If the third argument is not provided, the substring will extend to the end of the string.
-fn substring(input: &str, args: Rest<String>) -> String {
-    if args.is_empty() || args.len() > 2 {
-        return input.to_string();
-    }
-    let start: usize = args[0].parse::<usize>().unwrap_or(0);
-    let end = if args.len() == 2 {
-        args[1].parse::<usize>().unwrap_or(input.len())
-    } else {
-        input.len()
-    };
-
-    input[start..end].to_string()
-}
-
-fn header(state: &State, key: &str) -> String {
-    let headers = state.lookup("headers");
-    let Some(headers) = headers else {
-        return "".to_string();
-    };
-
-    let Some(header_map) = <HashMap<String, String>>::deserialize(headers.clone()).ok() else {
-        return "".to_string();
-    };
-    header_map.get(key).cloned().unwrap_or_default()
-}
-
-fn request_header(state: &State, key: &str) -> String {
-    let headers = state.lookup("request_headers");
-    let Some(headers) = headers else {
-        return "".to_string();
-    };
-
-    let Some(header_map) = <HashMap<String, String>>::deserialize(headers.clone()).ok() else {
-        return "".to_string();
-    };
-    header_map.get(key).cloned().unwrap_or_default()
 }
 
 /// This sets the request and response headers to the values specified in the filter config.

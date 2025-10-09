@@ -1,28 +1,30 @@
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
-pub type Strng = String;
+type Strng = String;
+
+pub mod jinja;
 
 #[derive(Default, Debug, Clone, Deserialize)]
 pub struct LocalTransformationConfig {
-	#[serde(default)]
-	pub request: Option<LocalTransform>,
-	#[serde(default)]
-	pub response: Option<LocalTransform>,
+    #[serde(default)]
+    pub request: Option<LocalTransform>,
+    #[serde(default)]
+    pub response: Option<LocalTransform>,
 }
 
-#[serde_as] 
+#[serde_as]
 #[derive(Default, Debug, Clone, Deserialize)]
 pub struct LocalTransform {
-	#[serde(default)]
-	#[serde_as(as = "serde_with::Map<_, _>")]
-	pub add: Vec<(Strng, Strng)>,
-	#[serde(default)]
-	#[serde_as(as = "serde_with::Map<_, _>")]
-	pub set: Vec<(Strng, Strng)>,
-	#[serde(default)]
-	pub remove: Vec<Strng>,
-	#[serde(default)]
-	pub body: Option<Strng>,
+    #[serde(default)]
+    #[serde_as(as = "serde_with::Map<_, _>")]
+    pub add: Vec<(Strng, Strng)>,
+    #[serde(default)]
+    #[serde_as(as = "serde_with::Map<_, _>")]
+    pub set: Vec<(Strng, Strng)>,
+    #[serde(default)]
+    pub remove: Vec<Strng>,
+    #[serde(default)]
+    pub body: Option<Strng>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
