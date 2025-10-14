@@ -91,13 +91,15 @@ pub fn transform_request_headers<F>(
     setters: &Vec<(String, String)>,
     env: &Environment<'static>,
     request_headers_map: &HashMap<String, String>,
-    mut set_request_header: F)
-where
-    F: FnMut(&str, &[u8]) -> bool
+    mut set_request_header: F,
+) where
+    F: FnMut(&str, &[u8]) -> bool,
 {
     for (key, value) in setters {
         let tmpl = env.template_from_str(value).unwrap();
-        let rendered = tmpl.render(context!(headers => request_headers_map, request_headers => request_headers_map));
+        let rendered = tmpl.render(
+            context!(headers => request_headers_map, request_headers => request_headers_map),
+        );
         let mut rendered_str = "".to_string();
         if let Ok(rendered_val) = rendered {
             rendered_str = rendered_val;
@@ -113,13 +115,15 @@ pub fn transform_response_headers<F>(
     env: &Environment<'static>,
     request_headers_map: &HashMap<String, String>,
     response_headers_map: &HashMap<String, String>,
-    mut set_response_header: F)
-where
-    F: FnMut(&str, &[u8]) -> bool
+    mut set_response_header: F,
+) where
+    F: FnMut(&str, &[u8]) -> bool,
 {
     for (key, value) in setters {
         let tmpl = env.template_from_str(value).unwrap();
-        let rendered = tmpl.render(context!(headers => response_headers_map, request_headers => request_headers_map));
+        let rendered = tmpl.render(
+            context!(headers => response_headers_map, request_headers => request_headers_map),
+        );
         let mut rendered_str = "".to_string();
         if let Ok(rendered_val) = rendered {
             rendered_str = rendered_val;

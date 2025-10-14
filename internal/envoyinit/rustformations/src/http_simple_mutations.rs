@@ -3,8 +3,8 @@ use envoy_proxy_dynamic_modules_rust_sdk::*;
 #[cfg(test)]
 use mockall::*;
 
-use std::collections::HashMap;
 use lazy_static::lazy_static;
+use std::collections::HashMap;
 
 lazy_static! {
     static ref EMPTY_MAP: HashMap<String, String> = HashMap::new();
@@ -63,7 +63,10 @@ impl Filter {
         self.per_route_config.as_deref()
     }
 
-    fn create_headers_map(&self, headers: Vec<(EnvoyBuffer, EnvoyBuffer)>) -> HashMap<String, String> {
+    fn create_headers_map(
+        &self,
+        headers: Vec<(EnvoyBuffer, EnvoyBuffer)>,
+    ) -> HashMap<String, String> {
         let mut headers_map = HashMap::new();
         for (key, val) in headers {
             let Some(key) = std::str::from_utf8(key.as_slice()).ok() else {
@@ -77,8 +80,8 @@ impl Filter {
         headers_map
     }
 
-    // This function is used to populate the self.request_headers_map so we only ever 
-    // do it once while we might need the request headers in either on_request_headers() or 
+    // This function is used to populate the self.request_headers_map so we only ever
+    // do it once while we might need the request headers in either on_request_headers() or
     // on_response_headers().
     fn populate_request_headers_map(&mut self, headers: Vec<(EnvoyBuffer, EnvoyBuffer)>) {
         if self.per_route_config.is_none() {
@@ -106,7 +109,12 @@ impl Filter {
             None => &self.filter_config.request_headers_setter,
         };
 
-        transformations::jinja::transform_request_headers(setters, &self.env, self.get_request_headers_map(), |key, value| envoy_filter.set_request_header(key, value));
+        transformations::jinja::transform_request_headers(
+            setters,
+            &self.env,
+            self.get_request_headers_map(),
+            |key, value| envoy_filter.set_request_header(key, value),
+        );
     }
 
     fn transform_response_headers<EHF: EnvoyHttpFilter>(&self, envoy_filter: &mut EHF) {
@@ -118,7 +126,13 @@ impl Filter {
         // TODO(nfuden): find someone who knows rust to see if we really need this Hash map for serialization
         let response_headers_map = self.create_headers_map(envoy_filter.get_response_headers());
 
-        transformations::jinja::transform_response_headers(setters, &self.env, self.get_request_headers_map(), &response_headers_map, |key, value| envoy_filter.set_response_header(key, value));
+        transformations::jinja::transform_response_headers(
+            setters,
+            &self.env,
+            self.get_request_headers_map(),
+            &response_headers_map,
+            |key, value| envoy_filter.set_response_header(key, value),
+        );
     }
 }
 
