@@ -84,7 +84,7 @@ impl Filter {
     // do it once while we might need the request headers in either on_request_headers() or
     // on_response_headers().
     fn populate_request_headers_map(&mut self, headers: Vec<(EnvoyBuffer, EnvoyBuffer)>) {
-        if self.per_route_config.is_none() {
+        if self.request_headers_map.is_none() {
             let mut request_headers_map = HashMap::new();
             for (key, val) in headers {
                 let Some(key) = std::str::from_utf8(key.as_slice()).ok() else {
