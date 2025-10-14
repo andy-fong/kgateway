@@ -1,5 +1,5 @@
 use minijinja::value::Rest;
-use minijinja::{Environment, State};
+use minijinja::{context, Environment, State};
 use serde::Deserialize;
 use std::collections::HashMap;
 
@@ -85,4 +85,47 @@ pub fn new_jinja_env() -> Environment<'static> {
     // specific.extend(self.route_specific.into_iter());
 
     env
+}
+
+pub fn transform_request_headers<F>(
+    setters: &Vec<(String, String)>,
+    env: &Environment<'static>,
+    request_headers_map: &HashMap<String, String>,
+    mut set_request_header: F)
+where
+    F: FnMut(&str, &[u8]) -> bool
+{
+    for (key, value) in setters {
+        let tmpl = env.template_from_str(value).unwrap();
+        let rendered = tmpl.render(context!(headers => request_headers_map, request_headers => request_headers_map));
+        let mut rendered_str = "".to_string();
+        if let Ok(rendered_val) = rendered {
+            rendered_str = rendered_val;
+        } else {
+            eprintln!("Error rendering template: {}", rendered.err().unwrap());
+        }
+        set_request_header(key, rendered_str.as_bytes());
+    }
+}
+
+pub fn transform_response_headers<F>(
+    setters: &Vec<(String, String)>,
+    env: &Environment<'static>,
+    request_headers_map: &HashMap<String, String>,
+    response_headers_map: &HashMap<String, String>,
+    mut set_response_header: F)
+where
+    F: FnMut(&str, &[u8]) -> bool
+{
+    for (key, value) in setters {
+        let tmpl = env.template_from_str(value).unwrap();
+        let rendered = tmpl.render(context!(headers => response_headers_map, request_headers => request_headers_map));
+        let mut rendered_str = "".to_string();
+        if let Ok(rendered_val) = rendered {
+            rendered_str = rendered_val;
+        } else {
+            eprintln!("Error rendering template: {}", rendered.err().unwrap());
+        }
+        set_response_header(key, rendered_str.as_bytes());
+    }
 }

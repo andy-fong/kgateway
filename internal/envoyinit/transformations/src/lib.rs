@@ -48,7 +48,7 @@ impl PerRouteConfig {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct FilterConfig {
     #[serde(default)]
     pub request_headers_setter: Vec<(String, String)>,
