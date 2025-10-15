@@ -32,7 +32,7 @@ RUN cargo zigbuild --target "${RUST_BUILD_ARCH}-unknown-linux-gnu"
 RUN cp /build/target/${RUST_BUILD_ARCH}-unknown-linux-gnu/debug/librust_module.so /build/librust_module.so
 
 # Stage 3: build the final envoy wrapper image
-FROM --platform=$BUILDPLATFORM $ENVOY_IMAGE AS envoy
+FROM --platform=$BUILDPLATFORM ${ENVOY_IMAGE} AS envoy
 ENV DEBIAN_FRONTEND=noninteractive
 
 # Update our deps to make cve toil lower

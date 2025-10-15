@@ -12,3 +12,7 @@ serde_with = { version = "3.14", features = [
     "macros",
     "alloc",
 ], default-features = false }
+
+[lib]
+path = "src/lib.rs"
+crate-type = ["cdylib"]
