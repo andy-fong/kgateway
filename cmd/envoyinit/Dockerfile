@@ -1,24 +1,30 @@
 ARG ENVOY_IMAGE
-
-FROM --platform=$BUILDPLATFORM ghcr.io/rust-cross/cargo-zigbuild:0.19.8 AS rust_builder
-
+ARG CARGO_ZBUILD_IMAGE=ghcr.io/rust-cross/cargo-zigbuild:0.19.8
+# Stage 1: pull in all rust build dependency and cache it in docker build cache layer
+FROM --platform=$BUILDPLATFORM ${CARGO_ZBUILD_IMAGE} AS rust_build_deps
 WORKDIR /build
+RUN apt update && apt install -y clang
+ARG RUSTFORMATIONS_DIR=./rustformations
+COPY ${RUSTFORMATIONS_DIR}/Cargo.toml ${RUSTFORMATIONS_DIR}/Cargo.lock ./
+RUN mkdir rustformations transformations
+COPY ${RUSTFORMATIONS_DIR}/rustformations/Cargo.toml ./rustformations
+COPY ${RUSTFORMATIONS_DIR}/transformations/Cargo.toml ./transformations
+RUN mkdir rustformations/src && echo "pub fn dummy() {}" > rustformations/src/lib.rs && \
+    mkdir transformations/src && echo "pub fn dummy() {}" > transformations/src/lib.rs 
+RUN cargo fetch && cargo zigbuild --target aarch64-unknown-linux-gnu
 
+# Stage 2: build actual dynamic module ----
+FROM --platform=$BUILDPLATFORM ${CARGO_ZBUILD_IMAGE} AS rust_builder
+WORKDIR /build
 RUN apt update && apt install -y clang
 
-
+# Copy cached target and cargo dirs from build-deps
+COPY --from=rust_build_deps /usr/local/cargo /usr/local/cargo
+COPY --from=rust_build_deps /build/target /build/target
 
 # Then copy the rest of the source code and build the library.
-# Parameterized to allow for supporting local, make and goreleaser builds
 ARG RUSTFORMATIONS_DIR=./rustformations
-# COPY ${RUSTFORMATIONS_DIR}/Cargo.toml ${RUSTFORMATIONS_DIR}/Cargo.lock ./
-# RUN mkdir src && echo "" > src/lib.rs
-# RUN cargo fetch
-# RUN rm -rf src
-
-# Then copy the rest of the source code and build the library.
 COPY ${RUSTFORMATIONS_DIR} .
-RUN cargo fetch
 # RUN cargo zigbuild --target x86_64-unknown-linux-gnu
 # switch to this locally if you are on arm
 RUN cargo zigbuild --target aarch64-unknown-linux-gnu
@@ -26,6 +32,7 @@ RUN cargo zigbuild --target aarch64-unknown-linux-gnu
 RUN cp /build/target/aarch64-unknown-linux-gnu/debug/librust_module.so /build/arm64_librust_module.so
 # RUN cp /build/target/x86_64-unknown-linux-gnu/debug/librust_module.so /build/amd64_librust_module.so
 
+# Stage 3: build the final envoy wrapper image
 FROM --platform=$BUILDPLATFORM $ENVOY_IMAGE AS envoy
 ENV DEBIAN_FRONTEND=noninteractive
 
