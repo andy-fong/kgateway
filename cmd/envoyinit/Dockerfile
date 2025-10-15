@@ -12,7 +12,12 @@ COPY ${RUSTFORMATIONS_DIR}/transformations/Cargo.toml ./transformations
 RUN mkdir rustformations/src && echo "pub fn dummy() {}" > rustformations/src/lib.rs && \
     mkdir transformations/src && echo "pub fn dummy() {}" > transformations/src/lib.rs 
 ARG RUST_BUILD_ARCH=x86_64 # options are x86_64 or aarch64
-RUN cargo fetch && cargo zigbuild --target "${RUST_BUILD_ARCH}-unknown-linux-gnu"
+RUN cargo fetch && cargo zigbuild --target ${RUST_BUILD_ARCH}-unknown-linux-gnu
+# Because we built the dummy lib in this Stage to cache all the dependencies in docker layer
+# That unfortunately also cached the dummy libs, and in Stage 2 when we COPY, it preserved
+# the timestamps of the source code, so it never re-compile the real lib. Need to remove them
+# here
+RUN for file in `find /build/target -name librust_module.so -o -name libtransformations*.rlib`; do rm $file; done
 
 # Stage 2: build envoy dynamic module
 FROM --platform=$BUILDPLATFORM ${CARGO_ZBUILD_IMAGE} AS rust_builder
@@ -27,7 +32,7 @@ COPY --from=rust_build_deps /build/target /build/target
 ARG RUSTFORMATIONS_DIR=./rustformations
 COPY ${RUSTFORMATIONS_DIR} .
 ARG RUST_BUILD_ARCH=x86_64 # options are x86_64 or aarch64
-RUN cargo zigbuild --target "${RUST_BUILD_ARCH}-unknown-linux-gnu"
+RUN cargo zigbuild --target ${RUST_BUILD_ARCH}-unknown-linux-gnu
 
 RUN cp /build/target/${RUST_BUILD_ARCH}-unknown-linux-gnu/debug/librust_module.so /build/librust_module.so
 
@@ -48,7 +53,6 @@ COPY envoyinit-linux-$GOARCH /usr/local/bin/envoyinit
 
 ENV ENVOY_DYNAMIC_MODULES_SEARCH_PATH=/usr/local/lib
 COPY --from=rust_builder /build/librust_module.so /usr/local/lib/librust_module.so
-
 
 # SDS-specific setup, only used if ENVOY_SIDECAR=true
 ARG ENTRYPOINT_SCRIPT=/docker-entrypoint.sh
