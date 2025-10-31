@@ -558,7 +558,9 @@ func (s *testingSuite) runTestCases(testCases []transformationTestCase) {
 					curl.WithHostHeader(fmt.Sprintf("example-%s.com", tc.routeName)),
 					curl.WithPort(8080),
 				),
-				tc.resp)
+				tc.resp,
+				4, /* timeout */
+				2 /* retry interval */)
 			if resp.StatusCode == http.StatusOK {
 				req, err := helper.CreateRequestFromEchoResponse(resp.Body)
 				g.Expect(err).NotTo(gomega.HaveOccurred())
