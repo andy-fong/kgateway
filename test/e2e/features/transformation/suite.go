@@ -161,6 +161,34 @@ func NewTestingSuite(ctx context.Context, testInst *e2e.TestInstallation) suite.
 				},
 			},
 			{
+				name:      "remove headers",
+				routeName: "headers",
+				opts: []curl.Option{
+					curl.WithBody("hello"),
+					curl.WithHeader("x-remove-me", "test"),
+					curl.WithHeader("x-dont-remove-me", "in request"),
+					// This instruct the echo server to set the response headers
+					curl.WithHeader("X-Echo-Set-Header", "x-remove-me:test,x-dont-remove-me:in response"),
+				},
+				resp: &testmatchers.HttpResponse{
+					StatusCode: http.StatusOK,
+					Headers: map[string]interface{}{
+						"x-dont-remove-me": "in response",
+					},
+					NotHeaders: []string{
+						"x-remove-me",
+					},
+				},
+				req: &testmatchers.HttpRequest{
+					Headers: map[string]interface{}{
+						"x-dont-remove-me": "in request",
+					},
+					NotHeaders: []string{
+						"x-remove-me",
+					},
+				},
+			},
+			{
 				name:      "set headers with headers already exists multiple times",
 				routeName: "headers",
 				opts: []curl.Option{

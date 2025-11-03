@@ -1,3 +1,4 @@
+use crate::LocalTransform;
 use crate::TransformationOps;
 use minijinja::value::Rest;
 use minijinja::{context, Environment, State};
@@ -89,12 +90,12 @@ pub fn new_jinja_env() -> Environment<'static> {
 }
 
 pub fn transform_request_headers<T: TransformationOps>(
-    setters: &Vec<(String, String)>,
+    transform: &LocalTransform,
     env: &Environment<'static>,
     request_headers_map: &HashMap<String, String>,
     mut ops: T,
 ) {
-    for (key, value) in setters {
+    for (key, value) in &transform.set {
         if value.is_empty() {
             ops.remove_request_header(key);
             continue;
@@ -111,16 +112,22 @@ pub fn transform_request_headers<T: TransformationOps>(
         }
         ops.set_request_header(key, rendered_str.as_bytes());
     }
+
+    // TODO: add is not supported by the rust SDK yet
+
+    for key in &transform.remove {
+        ops.remove_request_header(key);
+    }
 }
 
 pub fn transform_response_headers<T: TransformationOps>(
-    setters: &Vec<(String, String)>,
+    transform: &LocalTransform,
     env: &Environment<'static>,
     request_headers_map: &HashMap<String, String>,
     response_headers_map: &HashMap<String, String>,
     mut ops: T,
 ) {
-    for (key, value) in setters {
+    for (key, value) in &transform.set {
         if value.is_empty() {
             ops.remove_response_header(key);
             continue;
@@ -136,5 +143,11 @@ pub fn transform_response_headers<T: TransformationOps>(
             eprintln!("Error rendering template: {}", rendered.err().unwrap());
         }
         ops.set_response_header(key, rendered_str.as_bytes());
+    }
+
+    // TODO: add is not supported by the rust SDK yet
+
+    for key in &transform.remove {
+        ops.remove_response_header(key);
     }
 }

@@ -149,14 +149,14 @@ impl Filter {
     }
 
     fn transform_request_headers<EHF: EnvoyHttpFilter>(&self, envoy_filter: &mut EHF) {
-        let set = match self.get_per_route_config() {
-            Some(config) => &config.request.as_ref().map(|r| &r.set),
-            None => &self.filter_config.request.as_ref().map(|r| &r.set),
+        let request_transform = match self.get_per_route_config() {
+            Some(config) => &config.request,
+            None => &self.filter_config.request,
         };
 
-        if let Some(setters) = set {
+        if let Some(transform) = request_transform {
             transformations::jinja::transform_request_headers(
-                setters,
+                transform,
                 &self.env,
                 self.get_request_headers_map(),
                 EnvoyTransformationOps { envoy_filter },
@@ -165,17 +165,17 @@ impl Filter {
     }
 
     fn transform_response_headers<EHF: EnvoyHttpFilter>(&self, envoy_filter: &mut EHF) {
-        let set = match self.get_per_route_config() {
-            Some(config) => &config.response.as_ref().map(|r| &r.set),
-            None => &self.filter_config.response.as_ref().map(|r| &r.set),
+        let response_transform = match self.get_per_route_config() {
+            Some(config) => &config.response,
+            None => &self.filter_config.response,
         };
 
-        if let Some(setters) = set {
+        if let Some(transform) = response_transform {
             // TODO(nfuden): find someone who knows rust to see if we really need this Hash map for serialization
             let response_headers_map = self.create_headers_map(envoy_filter.get_response_headers());
 
             transformations::jinja::transform_response_headers(
-                setters,
+                transform,
                 &self.env,
                 self.get_request_headers_map(),
                 &response_headers_map,
