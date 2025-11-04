@@ -446,7 +446,7 @@ func NewTestingSuite(ctx context.Context, testInst *e2e.TestInstallation) suite.
 				name:      "custom functions",
 				routeName: "custom-functions",
 				opts: []curl.Option{
-					curl.WithBody("hello"),
+					curl.WithBody(`{"foo":"\"bar\""}`),
 				},
 				resp: &testmatchers.HttpResponse{
 					StatusCode: http.StatusOK,
