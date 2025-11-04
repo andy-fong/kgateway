@@ -32,6 +32,8 @@ spec:
           value: "foolen_{{request_header(\"content-length\")}}"
         - name: ":method"
           value: "pseudo-not-rejected!"
+        - name: "x-space-test"
+          value: " foobar "
       remove:
         - "x-remove-me"
     response:
@@ -41,5 +43,7 @@ spec:
           value: "{%- if request_header(\"x-add-bar\") != \"\" -%}supersuper{{request_header(\"x-add-bar\")}}{% else %}notsuper{% endif %}"
         - name: x-foo-response-status
           value: "{{header(\":status\")}}"
+        - name: "x-space-test"
+          value: " foobar "
       remove:
         - "x-remove-me"

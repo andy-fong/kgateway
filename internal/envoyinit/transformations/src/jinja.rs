@@ -1,6 +1,7 @@
 use crate::LocalTransform;
 use crate::TransformationOps;
-use minijinja::value::Rest;
+use base64::prelude::*;
+//use minijinja::value::Rest;
 use minijinja::{context, Environment, State};
 use serde::Deserialize;
 use std::collections::HashMap;
@@ -9,6 +10,7 @@ use std::collections::HashMap;
 // the first argument is the string to be modified, the second is the start position
 // of the substring, and the optional third argument is the length of the substring.
 // If the third argument is not provided, the substring will extend to the end of the string.
+/*
 fn substring(input: &str, args: Rest<String>) -> String {
     if args.is_empty() || args.len() > 2 {
         return input.to_string();
@@ -21,6 +23,15 @@ fn substring(input: &str, args: Rest<String>) -> String {
     };
 
     input[start..end].to_string()
+}
+*/
+
+fn substring(value: &str, start: u32, end: Option<u32>) -> String {
+    let end = end.unwrap_or(value.len() as _);
+    value
+        .get(start as usize..end as usize)
+        .unwrap_or_default()
+        .into()
 }
 
 fn header(state: &State, key: &str) -> String {
@@ -48,6 +59,18 @@ fn request_header(state: &State, key: &str) -> String {
     header_map.get(key).cloned().unwrap_or_default()
 }
 
+fn base64_encode(input: &[u8]) -> String {
+    BASE64_STANDARD.encode(input)
+}
+
+fn base64_decode(input: &str) -> String {
+    BASE64_STANDARD
+        .decode(input)
+        .ok()
+        .and_then(|bytes| String::from_utf8(bytes).ok())
+        .unwrap_or_default()
+}
+
 pub fn new_jinja_env() -> Environment<'static> {
     let mut env = Environment::new();
 
@@ -58,9 +81,9 @@ pub fn new_jinja_env() -> Environment<'static> {
 
     // !! Standard string manipulation
     // env.add_function("trim", trim);
-    // env.add_function("base64_encode", base64_encode);
+    env.add_function("base64_encode", base64_encode);
     // env.add_function("base64url_encode", base64url_encode);
-    // env.add_function("base64_decode", base64_decode);
+    env.add_function("base64_decode", base64_decode);
     // env.add_function("base64url_decode", base64url_decode);
     // env.add_function("replace_with_random", replace_with_random);
     // env.add_function("raw_string", raw_string);
@@ -106,11 +129,16 @@ pub fn transform_request_headers<T: TransformationOps>(
         );
         let mut rendered_str = "".to_string();
         if let Ok(rendered_val) = rendered {
+//            rendered_str = str::trim_end(&rendered_val).to_string();
             rendered_str = rendered_val;
         } else {
             eprintln!("Error rendering template: {}", rendered.err().unwrap());
         }
-        ops.set_request_header(key, rendered_str.as_bytes());
+        if rendered_str.is_empty() {
+            ops.remove_request_header(key);
+        } else {
+            ops.set_request_header(key, rendered_str.as_bytes());
+        }
     }
 
     // TODO: add is not supported by the rust SDK yet
@@ -138,11 +166,16 @@ pub fn transform_response_headers<T: TransformationOps>(
         );
         let mut rendered_str = "".to_string();
         if let Ok(rendered_val) = rendered {
+//            rendered_str = str::trim_end(&rendered_val).to_string();
             rendered_str = rendered_val;
         } else {
             eprintln!("Error rendering template: {}", rendered.err().unwrap());
         }
-        ops.set_response_header(key, rendered_str.as_bytes());
+        if rendered_str.is_empty() {
+            ops.remove_response_header(key);
+        } else {
+            ops.set_response_header(key, rendered_str.as_bytes());
+        }
     }
 
     // TODO: add is not supported by the rust SDK yet

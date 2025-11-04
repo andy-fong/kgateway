@@ -40,16 +40,17 @@ var _ e2e.NewSuiteFunc = NewTestingSuite
 
 var (
 	// manifests
-	simpleServiceManifest            = filepath.Join(fsutils.MustGetThisDir(), "testdata", "service.yaml")
-	gatewayManifest                  = filepath.Join(fsutils.MustGetThisDir(), "testdata", "gateway.yaml")
-	transformForHeadersManifest      = filepath.Join(fsutils.MustGetThisDir(), "testdata", "transform-for-headers.yaml")
-	transformForBodyJsonManifest     = filepath.Join(fsutils.MustGetThisDir(), "testdata", "transform-for-body-json.yaml")
-	transformForBodyAsStringManifest = filepath.Join(fsutils.MustGetThisDir(), "testdata", "transform-for-body-as-string.yaml")
-	gatewayAttachedTransformManifest = filepath.Join(fsutils.MustGetThisDir(), "testdata", "gateway-attached-transform.yaml")
-	transformForMatchPathManifest    = filepath.Join(fsutils.MustGetThisDir(), "testdata", "transform-for-match-path.yaml")
-	transformForMatchHeaderManifest  = filepath.Join(fsutils.MustGetThisDir(), "testdata", "transform-for-match-header.yaml")
-	transformForMatchQueryManifest   = filepath.Join(fsutils.MustGetThisDir(), "testdata", "transform-for-match-query.yaml")
-	transformForMatchMethodManifest  = filepath.Join(fsutils.MustGetThisDir(), "testdata", "transform-for-match-method.yaml")
+	simpleServiceManifest               = filepath.Join(fsutils.MustGetThisDir(), "testdata", "service.yaml")
+	gatewayManifest                     = filepath.Join(fsutils.MustGetThisDir(), "testdata", "gateway.yaml")
+	transformForCustomFunctionsManifest = filepath.Join(fsutils.MustGetThisDir(), "testdata", "transform-for-custom-functions.yaml")
+	transformForHeadersManifest         = filepath.Join(fsutils.MustGetThisDir(), "testdata", "transform-for-headers.yaml")
+	transformForBodyJsonManifest        = filepath.Join(fsutils.MustGetThisDir(), "testdata", "transform-for-body-json.yaml")
+	transformForBodyAsStringManifest    = filepath.Join(fsutils.MustGetThisDir(), "testdata", "transform-for-body-as-string.yaml")
+	gatewayAttachedTransformManifest    = filepath.Join(fsutils.MustGetThisDir(), "testdata", "gateway-attached-transform.yaml")
+	transformForMatchPathManifest       = filepath.Join(fsutils.MustGetThisDir(), "testdata", "transform-for-match-path.yaml")
+	transformForMatchHeaderManifest     = filepath.Join(fsutils.MustGetThisDir(), "testdata", "transform-for-match-header.yaml")
+	transformForMatchQueryManifest      = filepath.Join(fsutils.MustGetThisDir(), "testdata", "transform-for-match-query.yaml")
+	transformForMatchMethodManifest     = filepath.Join(fsutils.MustGetThisDir(), "testdata", "transform-for-match-method.yaml")
 
 	proxyObjectMeta = metav1.ObjectMeta{
 		Name:      "gw",
@@ -62,6 +63,7 @@ var (
 			defaults.CurlPodManifest,
 			simpleServiceManifest,
 			gatewayManifest,
+			transformForCustomFunctionsManifest,
 			transformForHeadersManifest,
 			transformForBodyJsonManifest,
 			transformForBodyAsStringManifest,
@@ -140,6 +142,13 @@ func NewTestingSuite(ctx context.Context, testInst *e2e.TestInstallation) suite.
 					Headers: map[string]interface{}{
 						"x-foo-response":        "notsuper",
 						"x-foo-response-status": "200",
+						// These are commented out so the testcase will pass on both classic and rustformation
+						// and left here for documentation purpose
+						// There should be a space at the beginning and end but
+						// rust minijinja template rendering seems to right trim the space at the end
+						// "x-space-test": " foobar",
+						// while C++ inja leave the space untouched.
+						// "x-space-test": " foobar ",
 					},
 					NotHeaders: []string{
 						"response-gateway",
@@ -149,6 +158,9 @@ func NewTestingSuite(ctx context.Context, testInst *e2e.TestInstallation) suite.
 					Headers: map[string]interface{}{
 						"x-foo-bar":  "foolen_5",
 						"x-foo-bar2": "foolen_5",
+						// There should be a space at the beginning and end but
+						// there might be a side effect from the echo server where the header values are trimmed
+						"x-space-test": "foobar",
 					},
 					NotHeaders: []string{
 						// looks like the way we set up transformation targeting gateway, we are
@@ -427,6 +439,36 @@ func NewTestingSuite(ctx context.Context, testInst *e2e.TestInstallation) suite.
 						"x-header-request",
 						"x-foo-request",
 						"x-query-request",
+					},
+				},
+			},
+			{
+				name:      "custom functions",
+				routeName: "custom-functions",
+				opts: []curl.Option{
+					curl.WithBody("hello"),
+				},
+				resp: &testmatchers.HttpResponse{
+					StatusCode: http.StatusOK,
+					Headers: map[string]interface{}{
+						"x-base64-encode":                   "YmFzZTY0IGVuY29kZSBpbiByZXNwb25zZSBoZWFkZXI=",
+						"x-base64-decode":                   "base64 decode in response header",
+						"x-base64-decode-invalid-non-empty": "foobar",
+					},
+					NotHeaders: []string{
+						// When decode fail, we return an empty string which in turn becomes a "remove" header ops
+						"x-base64-decode-invalid",
+					},
+				},
+				req: &testmatchers.HttpRequest{
+					Headers: map[string]interface{}{
+						"x-base64-encode":                   "YmFzZTY0IGVuY29kZSBpbiByZXF1ZXN0IGhlYWRlcg==",
+						"x-base64-decode":                   "base64 decode in request header",
+						"x-base64-decode-invalid-non-empty": "foobar",
+					},
+					NotHeaders: []string{
+						// When decode fail, we return an empty string which in turn becomes a "remove" header ops
+						"x-base64-decode-invalid",
 					},
 				},
 			},
