@@ -454,10 +454,16 @@ func NewTestingSuite(ctx context.Context, testInst *e2e.TestInstallation) suite.
 						"x-base64-encode":                   "YmFzZTY0IGVuY29kZSBpbiByZXNwb25zZSBoZWFkZXI=",
 						"x-base64-decode":                   "base64 decode in response header",
 						"x-base64-decode-invalid-non-empty": "foobar",
+						"x-substring":                       "response",
+						"x-substring2":                      "resp",
+						// when the len is invalid, we default to the end of the string
+						"x-substring-invalid2": "response",
 					},
 					NotHeaders: []string{
 						// When decode fail, we return an empty string which in turn becomes a "remove" header ops
 						"x-base64-decode-invalid",
+						// when start is invalid, we return an empty string which in turn becomes a "remove" header ops
+						"x-substring-invalid",
 					},
 				},
 				req: &testmatchers.HttpRequest{
@@ -465,10 +471,16 @@ func NewTestingSuite(ctx context.Context, testInst *e2e.TestInstallation) suite.
 						"x-base64-encode":                   "YmFzZTY0IGVuY29kZSBpbiByZXF1ZXN0IGhlYWRlcg==",
 						"x-base64-decode":                   "base64 decode in request header",
 						"x-base64-decode-invalid-non-empty": "foobar",
+						"x-substring":                       "request",
+						"x-substring2":                      "req",
+						// when the len is invalid, we default to the end of the string
+						"x-substring-invalid2": "request",
 					},
 					NotHeaders: []string{
 						// When decode fail, we return an empty string which in turn becomes a "remove" header ops
 						"x-base64-decode-invalid",
+						// when start is invalid, we return an empty string which in turn becomes a "remove" header ops
+						"x-substring-invalid",
 					},
 				},
 			},
@@ -543,6 +555,7 @@ func (s *testingSuite) TestGatewayWithTransformedRoute() {
 		},
 	}
 	testCases = append(testCases, s.commonTestCases...)
+	//	testCases = append(testCases, s.commonTestCases[len(s.commonTestCases)-1])
 	s.runTestCases((testCases))
 }
 
@@ -626,6 +639,7 @@ func (s *testingSuite) TestGatewayRustformationsWithTransformedRoute() {
 
 	testCases := []transformationTestCase{}
 	testCases = append(testCases, s.commonTestCases...)
+	//	testCases = append(testCases, s.commonTestCases[len(s.commonTestCases)-1])
 	s.runTestCases((testCases))
 }
 

@@ -1,7 +1,6 @@
 use crate::LocalTransform;
 use crate::TransformationOps;
 use base64::prelude::*;
-//use minijinja::value::Rest;
 use minijinja::{context, Environment, State};
 use serde::Deserialize;
 use std::collections::HashMap;
@@ -9,29 +8,22 @@ use std::collections::HashMap;
 // substring can be called with either two or three arguments --
 // the first argument is the string to be modified, the second is the start position
 // of the substring, and the optional third argument is the length of the substring.
-// If the third argument is not provided, the substring will extend to the end of the string.
-/*
-fn substring(input: &str, args: Rest<String>) -> String {
-    if args.is_empty() || args.len() > 2 {
-        return input.to_string();
+// If the third argument is not provided or invalid, the substring will extend to 
+// the end of the string.
+fn substring(input: &str, start: usize, len: Option<usize>) -> String {
+    let input_len = input.len();
+    if start >= input_len {
+        return "".to_string();
     }
-    let start: usize = args[0].parse::<usize>().unwrap_or(0);
-    let end = if args.len() == 2 {
-        args[1].parse::<usize>().unwrap_or(input.len())
-    } else {
-        input.len()
-    };
+
+    let mut end = input_len;
+    if let Some(len) = len {
+        if start + len <= input_len {
+            end = start + len
+        }
+    }
 
     input[start..end].to_string()
-}
-*/
-
-fn substring(value: &str, start: u32, end: Option<u32>) -> String {
-    let end = end.unwrap_or(value.len() as _);
-    value
-        .get(start as usize..end as usize)
-        .unwrap_or_default()
-        .into()
 }
 
 fn header(state: &State, key: &str) -> String {
@@ -129,7 +121,7 @@ pub fn transform_request_headers<T: TransformationOps>(
         );
         let mut rendered_str = "".to_string();
         if let Ok(rendered_val) = rendered {
-//            rendered_str = str::trim_end(&rendered_val).to_string();
+            //            rendered_str = str::trim_end(&rendered_val).to_string();
             rendered_str = rendered_val;
         } else {
             eprintln!("Error rendering template: {}", rendered.err().unwrap());
@@ -166,7 +158,7 @@ pub fn transform_response_headers<T: TransformationOps>(
         );
         let mut rendered_str = "".to_string();
         if let Ok(rendered_val) = rendered {
-//            rendered_str = str::trim_end(&rendered_val).to_string();
+            //            rendered_str = str::trim_end(&rendered_val).to_string();
             rendered_str = rendered_val;
         } else {
             eprintln!("Error rendering template: {}", rendered.err().unwrap());
