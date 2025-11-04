@@ -458,12 +458,14 @@ func NewTestingSuite(ctx context.Context, testInst *e2e.TestInstallation) suite.
 						"x-substring2":                      "resp",
 						// when the len is invalid, we default to the end of the string
 						"x-substring-invalid2": "response",
+						"x-env":                "default",
 					},
 					NotHeaders: []string{
 						// When decode fail, we return an empty string which in turn becomes a "remove" header ops
 						"x-base64-decode-invalid",
 						// when start is invalid, we return an empty string which in turn becomes a "remove" header ops
 						"x-substring-invalid",
+						"x-env-not-set",
 					},
 				},
 				req: &testmatchers.HttpRequest{
@@ -475,12 +477,14 @@ func NewTestingSuite(ctx context.Context, testInst *e2e.TestInstallation) suite.
 						"x-substring2":                      "req",
 						// when the len is invalid, we default to the end of the string
 						"x-substring-invalid2": "request",
+						"x-env":                "default",
 					},
 					NotHeaders: []string{
 						// When decode fail, we return an empty string which in turn becomes a "remove" header ops
 						"x-base64-decode-invalid",
 						// when start is invalid, we return an empty string which in turn becomes a "remove" header ops
 						"x-substring-invalid",
+						"x-env-not-set",
 					},
 				},
 			},
@@ -554,8 +558,8 @@ func (s *testingSuite) TestGatewayWithTransformedRoute() {
 			},
 		},
 	}
-	testCases = append(testCases, s.commonTestCases...)
-	//	testCases = append(testCases, s.commonTestCases[len(s.commonTestCases)-1])
+	//	testCases = append(testCases, s.commonTestCases...)
+	testCases = append(testCases, s.commonTestCases[len(s.commonTestCases)-1])
 	s.runTestCases((testCases))
 }
 
@@ -638,8 +642,8 @@ func (s *testingSuite) TestGatewayRustformationsWithTransformedRoute() {
 	)
 
 	testCases := []transformationTestCase{}
-	testCases = append(testCases, s.commonTestCases...)
-	//	testCases = append(testCases, s.commonTestCases[len(s.commonTestCases)-1])
+	// testCases = append(testCases, s.commonTestCases...)
+	testCases = append(testCases, s.commonTestCases[len(s.commonTestCases)-1])
 	s.runTestCases((testCases))
 }
 

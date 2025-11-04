@@ -1,6 +1,7 @@
 use crate::LocalTransform;
 use crate::TransformationOps;
 use base64::prelude::*;
+use std::env;
 use minijinja::{context, Environment, State};
 use serde::Deserialize;
 use std::collections::HashMap;
@@ -63,12 +64,17 @@ fn base64_decode(input: &str) -> String {
         .unwrap_or_default()
 }
 
+fn get_env(env_var: &str) -> String {
+    match env::var(env_var) {
+        Ok(val) => val,
+        Err(_e) => "".to_string()
+    }
+}
+
 pub fn new_jinja_env() -> Environment<'static> {
     let mut env = Environment::new();
 
-    // could add in line like this if we wanted to
-    // env.add_function("substring", |input: &str, args: Rest<String>| {
-
+    env.add_function("env", get_env);
     env.add_function("substring", substring);
 
     // !! Standard string manipulation
