@@ -458,7 +458,8 @@ func NewTestingSuite(ctx context.Context, testInst *e2e.TestInstallation) suite.
 						"x-substring2":                      "resp",
 						// when the len is invalid, we default to the end of the string
 						"x-substring-invalid2": "response",
-						"x-env":                "default",
+						"x-env":                gomega.MatchRegexp(`default/gw-[a-f0-9]*-[a-z0-9]*`),
+						"x-replace-random":     gomega.MatchRegexp(`.+ be or not .+ be`),
 					},
 					NotHeaders: []string{
 						// When decode fail, we return an empty string which in turn becomes a "remove" header ops
@@ -477,7 +478,8 @@ func NewTestingSuite(ctx context.Context, testInst *e2e.TestInstallation) suite.
 						"x-substring2":                      "req",
 						// when the len is invalid, we default to the end of the string
 						"x-substring-invalid2": "request",
-						"x-env":                "default",
+						"x-env":                gomega.MatchRegexp(`default/gw-[a-f0-9]*-[a-z0-9]*`),
+						"x-replace-random":     gomega.MatchRegexp(`.+ be or not .+ be`),
 					},
 					NotHeaders: []string{
 						// When decode fail, we return an empty string which in turn becomes a "remove" header ops
@@ -558,8 +560,7 @@ func (s *testingSuite) TestGatewayWithTransformedRoute() {
 			},
 		},
 	}
-	//	testCases = append(testCases, s.commonTestCases...)
-	testCases = append(testCases, s.commonTestCases[len(s.commonTestCases)-1])
+	testCases = append(testCases, s.commonTestCases...)
 	s.runTestCases((testCases))
 }
 
@@ -642,8 +643,7 @@ func (s *testingSuite) TestGatewayRustformationsWithTransformedRoute() {
 	)
 
 	testCases := []transformationTestCase{}
-	// testCases = append(testCases, s.commonTestCases...)
-	testCases = append(testCases, s.commonTestCases[len(s.commonTestCases)-1])
+	testCases = append(testCases, s.commonTestCases...)
 	s.runTestCases((testCases))
 }
 

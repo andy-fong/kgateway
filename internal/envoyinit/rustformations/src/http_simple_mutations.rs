@@ -18,6 +18,8 @@ pub struct FilterConfig {
 
 struct EnvoyTransformationOps<'a> {
     envoy_filter: &'a mut dyn EnvoyHttpFilter,
+    //    TODO: see comment for get_random_pattern() below
+    //    random_pattern_map: &'a mut Option<HashMap<String, String>>,
 }
 
 impl TransformationOps for EnvoyTransformationOps<'_> {
@@ -33,6 +35,29 @@ impl TransformationOps for EnvoyTransformationOps<'_> {
     fn remove_response_header(&mut self, key: &str) -> bool {
         self.envoy_filter.remove_response_header(key)
     }
+    /*
+       TODO: was trying to use this to store the pattern in the request context that can be re-used
+             for all replace_with_random() custom function but have not been able to find a way to
+             do that yet with rust and minijinja
+
+       fn get_random_pattern(&mut self, key: &str) -> String {
+           let map = self.random_pattern_map.get_or_insert_with(HashMap::new);
+
+           if let Some(pattern) = map.get(key) {
+               return pattern.clone();
+           }
+
+           let new_pattern = rand::thread_rng()
+               .sample_iter(&Alphanumeric)
+               .take(8)
+               .map(char::from)
+               .collect()
+
+           map.insert(key.to_string(), new_pattern.clone());
+
+           new_pattern
+       }
+    */
 }
 
 impl Deref for FilterConfig {

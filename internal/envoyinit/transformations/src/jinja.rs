@@ -1,15 +1,19 @@
 use crate::LocalTransform;
 use crate::TransformationOps;
-use base64::prelude::*;
-use std::env;
+use base64::{
+    engine::general_purpose::{STANDARD, STANDARD_NO_PAD},
+    Engine,
+};
 use minijinja::{context, Environment, State};
+use rand::Rng;
 use serde::Deserialize;
 use std::collections::HashMap;
+use std::env;
 
 // substring can be called with either two or three arguments --
 // the first argument is the string to be modified, the second is the start position
 // of the substring, and the optional third argument is the length of the substring.
-// If the third argument is not provided or invalid, the substring will extend to 
+// If the third argument is not provided or invalid, the substring will extend to
 // the end of the string.
 fn substring(input: &str, start: usize, len: Option<usize>) -> String {
     let input_len = input.len();
@@ -53,11 +57,11 @@ fn request_header(state: &State, key: &str) -> String {
 }
 
 fn base64_encode(input: &[u8]) -> String {
-    BASE64_STANDARD.encode(input)
+    STANDARD.encode(input)
 }
 
 fn base64_decode(input: &str) -> String {
-    BASE64_STANDARD
+    STANDARD
         .decode(input)
         .ok()
         .and_then(|bytes| String::from_utf8(bytes).ok())
@@ -67,8 +71,23 @@ fn base64_decode(input: &str) -> String {
 fn get_env(env_var: &str) -> String {
     match env::var(env_var) {
         Ok(val) => val,
-        Err(_e) => "".to_string()
+        Err(_e) => "".to_string(),
     }
+}
+
+fn replace_with_random(input: &str, to_replace: &str) -> String {
+    // TODO: in the C++ version, the pattern is generated once per "to_replace" string
+    //       and get re-used for all calls within the request context but I cannot find
+    //       a way to do this here yet
+    let mut rng = rand::rng();
+    let high: u64 = rng.random();
+    let low: u64 = rng.random();
+    let mut random = [0u8; 16];
+    random[..8].copy_from_slice(&low.to_le_bytes());
+    random[8..].copy_from_slice(&high.to_le_bytes());
+
+    let pattern = STANDARD_NO_PAD.encode(random);
+    input.replace(to_replace, &pattern)
 }
 
 pub fn new_jinja_env() -> Environment<'static> {
@@ -83,7 +102,7 @@ pub fn new_jinja_env() -> Environment<'static> {
     // env.add_function("base64url_encode", base64url_encode);
     env.add_function("base64_decode", base64_decode);
     // env.add_function("base64url_decode", base64url_decode);
-    // env.add_function("replace_with_random", replace_with_random);
+    env.add_function("replace_with_random", replace_with_random);
     // env.add_function("raw_string", raw_string);
     //        env.add_function("word_count", word_count);
 
@@ -110,6 +129,23 @@ pub fn new_jinja_env() -> Environment<'static> {
     env
 }
 
+fn render(env: &Environment<'static>, ctx: minijinja::Value, template: &str) -> String {
+    let tmpl = match env.template_from_str(template) {
+        Ok(tmpl) => tmpl,
+        Err(e) => {
+            eprintln!("Error creating template: {e}");
+            return "".to_string();
+        }
+    };
+    match tmpl.render(ctx) {
+        Ok(rendered) => rendered,
+        Err(e) => {
+            eprintln!("Error rendering template: {e}");
+            "".to_string()
+        }
+    }
+}
+
 pub fn transform_request_headers<T: TransformationOps>(
     transform: &LocalTransform,
     env: &Environment<'static>,
@@ -118,20 +154,17 @@ pub fn transform_request_headers<T: TransformationOps>(
 ) {
     for (key, value) in &transform.set {
         if value.is_empty() {
+            // This is following the legacy transformation filter behavior
             ops.remove_request_header(key);
             continue;
         }
-        let tmpl = env.template_from_str(value).unwrap();
-        let rendered = tmpl.render(
+        let rendered_str = render(
+            env,
+            // for request rendering, both the header() and request_header() use the request_headers
+            // so, setting both to the request_headers_map in the context
             context!(headers => request_headers_map, request_headers => request_headers_map),
+            value,
         );
-        let mut rendered_str = "".to_string();
-        if let Ok(rendered_val) = rendered {
-            //            rendered_str = str::trim_end(&rendered_val).to_string();
-            rendered_str = rendered_val;
-        } else {
-            eprintln!("Error rendering template: {}", rendered.err().unwrap());
-        }
         if rendered_str.is_empty() {
             ops.remove_request_header(key);
         } else {
@@ -139,7 +172,7 @@ pub fn transform_request_headers<T: TransformationOps>(
         }
     }
 
-    // TODO: add is not supported by the rust SDK yet
+    // TODO: "add" header is not supported by the rust SDK yet
 
     for key in &transform.remove {
         ops.remove_request_header(key);
@@ -155,20 +188,17 @@ pub fn transform_response_headers<T: TransformationOps>(
 ) {
     for (key, value) in &transform.set {
         if value.is_empty() {
+            // This is following the legacy transformation filter behavior
             ops.remove_response_header(key);
             continue;
         }
-        let tmpl = env.template_from_str(value).unwrap();
-        let rendered = tmpl.render(
+        let rendered_str = render(
+            env,
+            // for response rendering, header() uses response_headers and request_header()
+            // uses the request_headers. So, setting them in the context accordingly
             context!(headers => response_headers_map, request_headers => request_headers_map),
+            value,
         );
-        let mut rendered_str = "".to_string();
-        if let Ok(rendered_val) = rendered {
-            //            rendered_str = str::trim_end(&rendered_val).to_string();
-            rendered_str = rendered_val;
-        } else {
-            eprintln!("Error rendering template: {}", rendered.err().unwrap());
-        }
         if rendered_str.is_empty() {
             ops.remove_response_header(key);
         } else {
@@ -176,7 +206,7 @@ pub fn transform_response_headers<T: TransformationOps>(
         }
     }
 
-    // TODO: add is not supported by the rust SDK yet
+    // TODO: "add" header is not supported by the rust SDK yet
 
     for key in &transform.remove {
         ops.remove_response_header(key);

@@ -41,11 +41,11 @@ spec:
         - name: x-substring-invalid2
           value: "{{substring(\"in request\", 3, 60)}}"
         - name: x-env
-          value: "{{env(\"POD_NAMESPACE\")}}"
+          value: "{{env(\"POD_NAMESPACE\")}}/{{env(\"POD_NAME\")}}"
         - name: x-env-not-set
           value: "{{env(\"FOOBAR\")}}"
-        - name: x-request-body
-          value: "{{body()}}"
+        - name: x-replace-random
+          value: "{{replace_with_random(\"to be or not to be\", \"to\")}}"
       body:
           parseAs: "AsJson"
           value: "{\"Foo\":\"{{ raw_string(foo) }}\"}"
@@ -68,6 +68,8 @@ spec:
         - name: x-substring-invalid2
           value: "{{substring(\"in response\", 3, 70)}}"
         - name: x-env
-          value: "{{env(\"POD_NAMESPACE\")}}"
+          value: "{{env(\"POD_NAMESPACE\")}}/{{env(\"POD_NAME\")}}"
         - name: x-env-not-set
           value: "{{env(\"FOOBAR\")}}"
+        - name: x-replace-random
+          value: "{{replace_with_random(\"to be or not to be\", \"to\")}}"
