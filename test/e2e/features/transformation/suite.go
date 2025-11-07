@@ -85,6 +85,7 @@ type transformationTestCase struct {
 	opts      []curl.Option
 	resp      *testmatchers.HttpResponse
 	req       *testmatchers.HttpRequest
+	url       string // with go-httpbin, cannot your curl.WithPath directly in opts because we need to add a path prefix (anything/:anything) to get the request data
 }
 
 // testingSuite is a suite of basic routing / "happy path" tests
@@ -179,16 +180,16 @@ func NewTestingSuite(ctx context.Context, testInst *e2e.TestInstallation) suite.
 					curl.WithBody("hello"),
 					curl.WithHeader("x-remove-me", "test"),
 					curl.WithHeader("x-dont-remove-me", "in request"),
-					// This instruct the echo server to set the response headers
-					curl.WithHeader("X-Echo-Set-Header", "x-remove-me:test,x-dont-remove-me:in response"),
 				},
 				resp: &testmatchers.HttpResponse{
 					StatusCode: http.StatusOK,
+					// go-httpbin doesn't allow setting custom response header, so make sure
+					// we get one of the default access-control header and removed the other
 					Headers: map[string]any{
-						"x-dont-remove-me": "in response",
+						"access-control-allow-credentials": "true",
 					},
 					NotHeaders: []string{
-						"x-remove-me",
+						"access-control-allow-origin",
 					},
 				},
 				req: &testmatchers.HttpRequest{
@@ -232,6 +233,7 @@ func NewTestingSuite(ctx context.Context, testInst *e2e.TestInstallation) suite.
 						// will not apply. Make sure it's not there.
 						"request-gateway",
 					},
+					Body: "hello",
 				},
 			},
 			{
@@ -269,9 +271,9 @@ func NewTestingSuite(ctx context.Context, testInst *e2e.TestInstallation) suite.
 				routeName: "match",
 				opts: []curl.Option{
 					curl.WithHeader("foo", "bar"),
-					curl.WithPath("/path_match/index.html"),
 					curl.WithQueryParameters(map[string]string{"test": "123"}),
 				},
+				url: "/path_match/index.html",
 				resp: &testmatchers.HttpResponse{
 					StatusCode: http.StatusOK,
 					Headers: map[string]any{
@@ -304,7 +306,6 @@ func NewTestingSuite(ctx context.Context, testInst *e2e.TestInstallation) suite.
 				routeName: "match",
 				opts: []curl.Option{
 					curl.WithHeader("foo", "bar"),
-					curl.WithPath("/index.html"),
 					curl.WithQueryParameters(map[string]string{"test": "123"}),
 				},
 				resp: &testmatchers.HttpResponse{
@@ -340,7 +341,6 @@ func NewTestingSuite(ctx context.Context, testInst *e2e.TestInstallation) suite.
 				opts: []curl.Option{
 					curl.WithBody("hello"),
 					curl.WithHeader("foo", "bar"),
-					curl.WithPath("/index.html"),
 					curl.WithQueryParameters(map[string]string{"test": "123"}),
 				},
 				resp: &testmatchers.HttpResponse{
@@ -374,7 +374,6 @@ func NewTestingSuite(ctx context.Context, testInst *e2e.TestInstallation) suite.
 				routeName: "match",
 				opts: []curl.Option{
 					curl.WithBody("hello"),
-					curl.WithPath("/index.html"),
 					curl.WithQueryParameters(map[string]string{"test": "123"}),
 				},
 				resp: &testmatchers.HttpResponse{
@@ -410,7 +409,6 @@ func NewTestingSuite(ctx context.Context, testInst *e2e.TestInstallation) suite.
 				routeName: "match",
 				opts: []curl.Option{
 					curl.WithBody("hello"),
-					curl.WithPath("/index.html"),
 				},
 				resp: &testmatchers.HttpResponse{
 					StatusCode: http.StatusNotFound,
@@ -488,6 +486,8 @@ func NewTestingSuite(ctx context.Context, testInst *e2e.TestInstallation) suite.
 						"x-substring-invalid",
 						"x-env-not-set",
 					},
+					// TODO: rustformation doesn't support body parsing yet
+					// Body: testmatchers.JSONContains([]byte(`{"Foo":"\"bar\""}`)),
 				},
 			},
 		},
@@ -657,12 +657,13 @@ func (s *testingSuite) runTestCases(testCases []transformationTestCase) {
 					curl.WithHost(kubeutils.ServiceFQDN(proxyObjectMeta)),
 					curl.WithHostHeader(fmt.Sprintf("example-%s.com", tc.routeName)),
 					curl.WithPort(8080),
+					curl.WithPath("anything/:anything"+tc.url), // This is the endpoint for httpbin to return the request in json
 				),
 				tc.resp,
 				6, /* timeout */
 				2 /* retry interval */)
 			if resp.StatusCode == http.StatusOK {
-				req, err := helper.CreateRequestFromEchoResponse(resp.Body)
+				req, err := helper.CreateRequestFromHttpBinResponse(resp.Body)
 				g.Expect(err).NotTo(gomega.HaveOccurred())
 				g.Expect(req).To(testmatchers.HaveHttpRequest(tc.req))
 			} else {
