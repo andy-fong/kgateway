@@ -1,6 +1,8 @@
+use anyhow::Result;
 use envoy_proxy_dynamic_modules_rust_sdk::*;
 use lazy_static::lazy_static;
 use serde::Deserialize;
+use serde_json::Value as JsonValue;
 use std::collections::HashMap;
 use transformations::{LocalTransformationConfig, TransformationOps};
 
@@ -17,8 +19,8 @@ pub struct FilterConfig {
 
 struct EnvoyTransformationOps<'a> {
     envoy_filter: &'a mut dyn EnvoyHttpFilter,
-    cached_request_body: Option<Vec<EnvoyMutBuffer<'a>>>,
-    cached_response_body: Option<Vec<EnvoyMutBuffer<'a>>>,
+    cached_request_body_json: Option<JsonValue>,
+    cached_response_body_json: Option<JsonValue>,
     //    TODO: see comment for get_random_pattern() below
     //    random_pattern_map: &'a mut Option<HashMap<String, String>>,
 }
@@ -27,12 +29,12 @@ impl<'a> EnvoyTransformationOps<'a> {
     fn new(envoy_filter: &'a mut dyn EnvoyHttpFilter) -> EnvoyTransformationOps<'a> {
         EnvoyTransformationOps {
             envoy_filter,
-            cached_request_body: None,
-            cached_response_body: None,
+            cached_request_body_json: None,
+            cached_response_body_json: None,
         }
     }
 }
-impl<'a> TransformationOps<'a> for EnvoyTransformationOps<'a> {
+impl TransformationOps for EnvoyTransformationOps<'_> {
     fn set_request_header(&mut self, key: &str, value: &[u8]) -> bool {
         self.envoy_filter.set_request_header(key, value)
     }
@@ -45,14 +47,18 @@ impl<'a> TransformationOps<'a> for EnvoyTransformationOps<'a> {
     fn remove_response_header(&mut self, key: &str) -> bool {
         self.envoy_filter.remove_response_header(key)
     }
-    fn get_request_body(&'a mut self) -> Option<Vec<&'a [u8]>> {
-        if self.cached_request_body.is_none() {
-            self.cached_request_body = self.envoy_filter.get_request_body();
+    fn parse_request_json_body(&mut self) -> Result<JsonValue> {
+        if self.cached_request_body_json.is_none() {
+            if let Some(buffers) = self.envoy_filter.get_request_body() {
+                // TODO: implement Reader for EnvoyBuffer and use serde_json::from_reader to avoid making copy first?
+                let chunks: Vec<_> = buffers.iter().map(|b| b.as_slice()).collect();
+                let body = chunks.concat();
+                self.cached_request_body_json = serde_json::from_slice(&body)?;
+            } else {
+                self.cached_request_body_json = Some(JsonValue::Null)
+            }
         }
-
-        self.cached_request_body
-            .as_ref()
-            .map(|buffers| buffers.iter().map(|b| b.as_slice()).collect())
+        Ok(self.cached_request_body_json.as_ref().unwrap().clone())
     }
     fn drain_request_body(&mut self, number_of_bytes: usize) -> bool {
         self.envoy_filter.drain_request_body(number_of_bytes)
@@ -60,14 +66,18 @@ impl<'a> TransformationOps<'a> for EnvoyTransformationOps<'a> {
     fn append_request_body(&mut self, data: &[u8]) -> bool {
         self.envoy_filter.append_request_body(data)
     }
-    fn get_response_body(&'a mut self) -> Option<Vec<&'a [u8]>> {
-        if self.cached_response_body.is_none() {
-            self.cached_response_body = self.envoy_filter.get_request_body();
+    fn parse_response_json_body(&mut self) -> Result<JsonValue> {
+        if self.cached_response_body_json.is_none() {
+            if let Some(buffers) = self.envoy_filter.get_response_body() {
+                // TODO: implement Reader for EnvoyBuffer and use serde_json::from_reader to avoid making copy first?
+                let chunks: Vec<_> = buffers.iter().map(|b| b.as_slice()).collect();
+                let body = chunks.concat();
+                self.cached_response_body_json = serde_json::from_slice(&body)?;
+            } else {
+                self.cached_response_body_json = Some(JsonValue::Null)
+            }
         }
-
-        self.cached_response_body
-            .as_ref()
-            .map(|buffers| buffers.iter().map(|b| b.as_slice()).collect())
+        Ok(self.cached_response_body_json.as_ref().unwrap().clone())
     }
     fn drain_response_body(&mut self, number_of_bytes: usize) -> bool {
         self.envoy_filter.drain_response_body(number_of_bytes)
@@ -204,11 +214,12 @@ impl Filter {
         };
 
         if let Some(transform) = request_transform {
+            let mut ops = EnvoyTransformationOps::new(envoy_filter);
             if let Err(e) = transformations::jinja::transform_request(
                 transform,
                 &self.env,
                 self.get_request_headers_map(),
-                EnvoyTransformationOps::new(envoy_filter),
+                &mut ops,
             ) {
                 envoy_log_warn!("{e}");
             }
@@ -252,7 +263,7 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
             // TODO: this here always stop iteration to wait for the full request body,
             //       need to support body passthrough
             envoy_log_info!("on_request_headers buffering");
-//            return abi::envoy_dynamic_module_type_on_http_filter_request_headers_status::StopAllIterationAndBuffer;
+            //            return abi::envoy_dynamic_module_type_on_http_filter_request_headers_status::StopAllIterationAndBuffer;
             return abi::envoy_dynamic_module_type_on_http_filter_request_headers_status::StopIteration;
         }
 
