@@ -61,6 +61,29 @@ fn request_header(state: &State, key: &str) -> String {
     header_map.get(key).cloned().unwrap_or_default()
 }
 
+fn trim_outer_quotes(s: &str) -> &str {
+    if s.starts_with('"') && s.ends_with('"') && s.len() >= 2 {
+        &s[1..s.len() - 1]
+    } else {
+        s
+    }
+}
+
+fn raw_string(value: &str) -> String {
+    // Not sure if this is exactly the correct behavior for this function. In the C++ version,
+    // the native json object can be added to the context directly and that json object can dump 
+    // out the raw string without un-escaping. Here, it's several layers of deserializing and serializing
+    // from serde_json::from_slice() -> constructing a BTreeMap -> adding that to the context. 
+    // There is no way to get back the original raw_string. So, escaping the string again is the closest I 
+    // can get. After escaping, the resulting string has extra double quote around the original string, so 
+    // need to trim them (somehow the need for trimming the double quotes is exactly the same in the C++
+    // code)
+    match serde_json::to_string(value) {
+        Ok(s) => trim_outer_quotes(&s).to_string(),
+        Err(_) => "".to_string()
+    }
+}
+
 fn base64_encode(input: &[u8]) -> String {
     STANDARD.encode(input)
 }
@@ -108,7 +131,7 @@ pub fn new_jinja_env() -> Environment<'static> {
     env.add_function("base64_decode", base64_decode);
     // env.add_function("base64url_decode", base64url_decode);
     env.add_function("replace_with_random", replace_with_random);
-    // env.add_function("raw_string", raw_string);
+    env.add_function("raw_string", raw_string);
     //        env.add_function("word_count", word_count);
 
     // !! Envoy context accessors
@@ -137,9 +160,9 @@ pub fn new_jinja_env() -> Environment<'static> {
 fn render(env: &Environment<'static>, ctx: minijinja::Value, template: &str) -> Result<String> {
     let tmpl = env
         .template_from_str(template)
-        .context("error creating jinja template {template}")?;
+        .with_context(|| format!("error creating jinja template {}", template))?;
     tmpl.render(ctx)
-        .context("error rendering jinja template {template}")
+        .with_context(|| format!("error rendering jinja template {}", template))
 }
 
 fn combine_errors(msg: &str, errors: Vec<Error>) -> Result<()> {
@@ -155,10 +178,12 @@ fn combine_errors(msg: &str, errors: Vec<Error>) -> Result<()> {
     Ok(())
 }
 
-/// Transform Request Headers
+/// Transform Request
 ///
-/// On any rendering errors, we will remove the header and continue
+/// On any header rendering errors, we will remove the header and continue
 /// All the errors are collected and bubble up the chain so they can be logged
+/// On body parsing as json error, we return error immediately so we can send a 
+/// 400 response back 
 pub fn transform_request<T: TransformationOps>(
     transform: &LocalTransform,
     env: &Environment<'static>,
@@ -167,45 +192,56 @@ pub fn transform_request<T: TransformationOps>(
 ) -> Result<()> {
     let mut errors = Vec::new();
 
+    let mut m = BTreeMap::new();
+    // for request rendering, both the header() and request_header() use the request_headers
+    // so, setting both to the request_headers_map in the context
+    m.insert("headers".to_string(), minijinja::Value::from_serialize(request_headers_map));
+    m.insert("request_headers".to_string(), minijinja::Value::from_serialize(request_headers_map));
     if let Some(body_transform) = transform.body.as_ref() {
-        if matches!(body_transform.parse_as, BodyParseBehavior::AsJson)
-            && !body_transform.value.is_empty()
-        {
+        if matches!(body_transform.parse_as, BodyParseBehavior::AsJson) {
+            println!("body_transform: {}", body_transform.value);
             let json_body = ops.parse_request_json_body()?;
 
             if json_body != JsonValue::Null {
-                ops.drain_request_body(u64::MAX.try_into().unwrap());
-                let ctx = minijinja::Value::from({
-                    let mut m = BTreeMap::new();
-                    if let JsonValue::Object(map) = json_body {
-                        for (k, v) in map {
-                            m.insert(k, minijinja::Value::from_serialize(&v));
-                        }
+                println!("body_transform: got json body");
+                if let JsonValue::Object(map) = json_body {
+                    for (k, v) in map {
+                        println!(
+                            "body_transform: {} = {}",
+                            k,
+                            minijinja::Value::from_serialize(&v)
+                        );
+                        m.insert(k, minijinja::Value::from_serialize(&v));
                     }
-                    m
-                });
-
-                let rendered = match render(env, ctx, &body_transform.value) {
-                    Ok(str) => Some(str),
-                    Err(e) => {
-                        errors.push(e);
-                        None
-                    }
-                };
-
-                if rendered.as_deref().is_some_and(|s| !s.is_empty()) {
-                    let rendered_body = rendered.as_deref().unwrap().as_bytes();
-                    ops.set_request_header(
-                        "content-length",
-                        rendered_body.len().to_string().as_bytes(),
-                    );
-                    ops.append_request_body(rendered_body);
-                } else {
-                    ops.set_request_header("content-length", b"0");
                 }
             }
         }
     }
+
+    let ctx = minijinja::Value::from(m);
+
+    if let Some(body_transform) = transform.body.as_ref() {
+        if !body_transform.value.is_empty() {
+            ops.drain_request_body(u64::MAX.try_into().unwrap());
+            let rendered = match render(env, ctx.clone(), &body_transform.value) {
+                Ok(str) => Some(str),
+                Err(e) => {
+                    errors.push(e);
+                    None
+                }
+            };
+            if rendered.as_deref().is_some_and(|s| !s.is_empty()) {
+                let rendered_body = rendered.as_deref().unwrap().as_bytes();
+                ops.set_request_header(
+                    "content-length",
+                    rendered_body.len().to_string().as_bytes(),
+                );
+                ops.append_request_body(rendered_body);
+            } else {
+                ops.set_request_header("content-length", b"0");
+            }
+        }
+    } 
 
     for NameValuePair { name: key, value } in &transform.set {
         if value.is_empty() {
@@ -215,9 +251,7 @@ pub fn transform_request<T: TransformationOps>(
         }
         let rendered = match render(
             env,
-            // for request rendering, both the header() and request_header() use the request_headers
-            // so, setting both to the request_headers_map in the context
-            context!(headers => request_headers_map, request_headers => request_headers_map),
+            ctx.clone(),
             value,
         ) {
             Ok(str) => Some(str),
@@ -243,11 +277,11 @@ pub fn transform_request<T: TransformationOps>(
     combine_errors("transform_request()", errors)
 }
 
-/// Transform Resposne Headers
+/// Transform Response
 ///
 /// On any rendering errors, we will remove the header and continue
 /// All the errors are collected and bubble up the chain so they can be logged
-pub fn transform_response_headers<T: TransformationOps>(
+pub fn transform_response<T: TransformationOps>(
     transform: &LocalTransform,
     env: &Environment<'static>,
     request_headers_map: &HashMap<String, String>,
@@ -289,5 +323,5 @@ pub fn transform_response_headers<T: TransformationOps>(
         ops.remove_response_header(key);
     }
 
-    combine_errors("transform_response_headers()", errors)
+    combine_errors("transform_response()", errors)
 }

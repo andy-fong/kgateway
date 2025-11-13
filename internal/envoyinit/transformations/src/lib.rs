@@ -26,7 +26,7 @@ pub struct LocalTransform {
 
 #[derive(Default, Clone, Deserialize)]
 pub struct BodyTransform {
-    #[serde(default)]
+    #[serde(default, rename = "parseAs")]
     pub parse_as: BodyParseBehavior,
     #[serde(default)]
     pub value: String,
@@ -39,7 +39,7 @@ pub struct NameValuePair {
     pub value: String,
 }
 
-#[derive(Default, Clone, Deserialize)]
+#[derive(Default, Debug, Clone, Deserialize)]
 pub enum BodyParseBehavior {
     #[default]
     AsString,

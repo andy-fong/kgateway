@@ -478,6 +478,7 @@ func NewTestingSuite(ctx context.Context, testInst *e2e.TestInstallation) suite.
 						"x-substring-invalid2": "request",
 						"x-env":                gomega.MatchRegexp(`default/gw-[a-f0-9]*-[a-z0-9]*`),
 						"x-replace-random":     gomega.MatchRegexp(`.+ be or not .+ be`),
+						"content-length":       "31",
 					},
 					NotHeaders: []string{
 						// When decode fail, we return an empty string which in turn becomes a "remove" header ops
@@ -486,8 +487,7 @@ func NewTestingSuite(ctx context.Context, testInst *e2e.TestInstallation) suite.
 						"x-substring-invalid",
 						"x-env-not-set",
 					},
-					// TODO: rustformation doesn't support body parsing yet
-					// Body: testmatchers.JSONContains([]byte(`{"Foo":"\"bar\""}`)),
+					Body: testmatchers.JSONContains([]byte(`{"Foo":"\"bar\""}`)),
 				},
 			},
 		},
