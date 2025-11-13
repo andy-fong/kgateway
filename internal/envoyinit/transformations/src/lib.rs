@@ -44,9 +44,15 @@ pub enum BodyParseBehavior {
     AsJson,
 }
 
-pub trait TransformationOps {
+pub trait TransformationOps<'a> {
     fn set_request_header(&mut self, key: &str, value: &[u8]) -> bool;
     fn remove_request_header(&mut self, key: &str) -> bool;
     fn set_response_header(&mut self, key: &str, value: &[u8]) -> bool;
     fn remove_response_header(&mut self, key: &str) -> bool;
+    fn get_request_body(&'a mut self) -> Option<Vec<&'a [u8]>>;
+    fn drain_request_body(&mut self, number_of_bytes: usize) -> bool;
+    fn append_request_body(&mut self, data: &[u8]) -> bool;
+    fn get_response_body(&'a mut self) -> Option<Vec<&'a [u8]>>;
+    fn drain_response_body(&mut self, number_of_bytes: usize) -> bool;
+    fn append_response_body(&mut self, data: &[u8]) -> bool;
 }

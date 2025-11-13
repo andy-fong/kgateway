@@ -17,11 +17,22 @@ pub struct FilterConfig {
 
 struct EnvoyTransformationOps<'a> {
     envoy_filter: &'a mut dyn EnvoyHttpFilter,
+    cached_request_body: Option<Vec<EnvoyMutBuffer<'a>>>,
+    cached_response_body: Option<Vec<EnvoyMutBuffer<'a>>>,
     //    TODO: see comment for get_random_pattern() below
     //    random_pattern_map: &'a mut Option<HashMap<String, String>>,
 }
 
-impl TransformationOps for EnvoyTransformationOps<'_> {
+impl<'a> EnvoyTransformationOps<'a> {
+    fn new(envoy_filter: &'a mut dyn EnvoyHttpFilter) -> EnvoyTransformationOps<'a> {
+        EnvoyTransformationOps {
+            envoy_filter,
+            cached_request_body: None,
+            cached_response_body: None,
+        }
+    }
+}
+impl<'a> TransformationOps<'a> for EnvoyTransformationOps<'a> {
     fn set_request_header(&mut self, key: &str, value: &[u8]) -> bool {
         self.envoy_filter.set_request_header(key, value)
     }
@@ -33,6 +44,36 @@ impl TransformationOps for EnvoyTransformationOps<'_> {
     }
     fn remove_response_header(&mut self, key: &str) -> bool {
         self.envoy_filter.remove_response_header(key)
+    }
+    fn get_request_body(&'a mut self) -> Option<Vec<&'a [u8]>> {
+        if self.cached_request_body.is_none() {
+            self.cached_request_body = self.envoy_filter.get_request_body();
+        }
+
+        self.cached_request_body
+            .as_ref()
+            .map(|buffers| buffers.iter().map(|b| b.as_slice()).collect())
+    }
+    fn drain_request_body(&mut self, number_of_bytes: usize) -> bool {
+        self.envoy_filter.drain_request_body(number_of_bytes)
+    }
+    fn append_request_body(&mut self, data: &[u8]) -> bool {
+        self.envoy_filter.append_request_body(data)
+    }
+    fn get_response_body(&'a mut self) -> Option<Vec<&'a [u8]>> {
+        if self.cached_response_body.is_none() {
+            self.cached_response_body = self.envoy_filter.get_request_body();
+        }
+
+        self.cached_response_body
+            .as_ref()
+            .map(|buffers| buffers.iter().map(|b| b.as_slice()).collect())
+    }
+    fn drain_response_body(&mut self, number_of_bytes: usize) -> bool {
+        self.envoy_filter.drain_response_body(number_of_bytes)
+    }
+    fn append_response_body(&mut self, data: &[u8]) -> bool {
+        self.envoy_filter.append_response_body(data)
     }
     /*
        TODO: was trying to use this to store the pattern in the request context that can be re-used
@@ -156,18 +197,18 @@ impl Filter {
         self.request_headers_map.as_ref().unwrap_or(&EMPTY_MAP)
     }
 
-    fn transform_request_headers<EHF: EnvoyHttpFilter>(&self, envoy_filter: &mut EHF) {
+    fn transform_request<EHF: EnvoyHttpFilter>(&self, envoy_filter: &mut EHF) {
         let request_transform = match self.get_per_route_config() {
             Some(config) => &config.transformations.request,
             None => &self.filter_config.transformations.request,
         };
 
         if let Some(transform) = request_transform {
-            if let Err(e) = transformations::jinja::transform_request_headers(
+            if let Err(e) = transformations::jinja::transform_request(
                 transform,
                 &self.env,
                 self.get_request_headers_map(),
-                EnvoyTransformationOps { envoy_filter },
+                EnvoyTransformationOps::new(envoy_filter),
             ) {
                 envoy_log_warn!("{e}");
             }
@@ -189,7 +230,7 @@ impl Filter {
                 &self.env,
                 self.get_request_headers_map(),
                 &response_headers_map,
-                EnvoyTransformationOps { envoy_filter },
+                EnvoyTransformationOps::new(envoy_filter),
             ) {
                 envoy_log_warn!("{e}");
             }
@@ -204,19 +245,21 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
         envoy_filter: &mut EHF,
         _end_of_stream: bool,
     ) -> abi::envoy_dynamic_module_type_on_http_filter_request_headers_status {
-        envoy_log_trace!("on_request_headers");
+        envoy_log_info!("on_request_headers");
         // TODO: need to test if we get called even if there is no transformation setting
         //       if yes, we need to short circuit here and return Continue
         if !_end_of_stream {
             // TODO: this here always stop iteration to wait for the full request body,
             //       need to support body passthrough
+            envoy_log_info!("on_request_headers buffering");
+//            return abi::envoy_dynamic_module_type_on_http_filter_request_headers_status::StopAllIterationAndBuffer;
             return abi::envoy_dynamic_module_type_on_http_filter_request_headers_status::StopIteration;
         }
 
         self.set_per_route_config(envoy_filter);
         // TODO(nfuden): find someone who knows rust to see if we really need this Hash map for serialization
         self.populate_request_headers_map(envoy_filter.get_request_headers());
-        self.transform_request_headers(envoy_filter);
+        self.transform_request(envoy_filter);
         abi::envoy_dynamic_module_type_on_http_filter_request_headers_status::Continue
     }
 
@@ -225,10 +268,11 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
         envoy_filter: &mut EHF,
         end_of_stream: bool,
     ) -> abi::envoy_dynamic_module_type_on_http_filter_request_body_status {
-        envoy_log_trace!("on_request_body");
+        envoy_log_info!("on_request_body");
         // TODO: need to test if we get called even if there is no transformation setting
         //       if yes, we need to short circuit here and return Continue
         if !end_of_stream {
+            envoy_log_error!("on_request_body not end_of_stream! Should not happen.");
             // TODO: Technically, we don't need to buffer the body yet as we don't support parsing the body now
             //       but it will be coming next. This is mimicking the C++ transformation filter behavior to
             //       always buffer the request body by default unless passthrough is set. Will revisit and consider
@@ -239,7 +283,7 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
         self.set_per_route_config(envoy_filter);
         // TODO(nfuden): find someone who knows rust to see if we really need this Hash map for serialization
         self.populate_request_headers_map(envoy_filter.get_request_headers());
-        self.transform_request_headers(envoy_filter);
+        self.transform_request(envoy_filter);
         abi::envoy_dynamic_module_type_on_http_filter_request_body_status::Continue
     }
 

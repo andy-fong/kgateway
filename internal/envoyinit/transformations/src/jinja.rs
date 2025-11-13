@@ -1,3 +1,4 @@
+use crate::BodyParseBehavior;
 use crate::LocalTransform;
 use crate::NameValuePair;
 use crate::TransformationOps;
@@ -9,6 +10,8 @@ use base64::{
 use minijinja::{context, Environment, State};
 use rand::Rng;
 use serde::Deserialize;
+use serde_json::{json, Value as JsonValue};
+use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::env;
 
@@ -152,17 +155,59 @@ fn combine_errors(msg: &str, errors: Vec<Error>) -> Result<()> {
     Ok(())
 }
 
+pub fn parse_json_body<'a, T: TransformationOps<'a>>(
+    ops: &'a mut T,
+) -> Result<JsonValue> {
+    if let Some(chunks) = ops.get_request_body() {
+        let body = chunks.concat();
+        serde_json::from_slice(&body)?
+    } 
+    Ok(JsonValue::Null)
+}
 /// Transform Request Headers
 ///
 /// On any rendering errors, we will remove the header and continue
 /// All the errors are collected and bubble up the chain so they can be logged
-pub fn transform_request_headers<T: TransformationOps>(
+pub fn transform_request<'a, T: TransformationOps<'a>>(
     transform: &LocalTransform,
     env: &Environment<'static>,
     request_headers_map: &HashMap<String, String>,
     mut ops: T,
 ) -> Result<()> {
     let mut errors = Vec::new();
+
+    if let Some(body_transform) = transform.body.as_ref() {
+        if matches!(body_transform.parse_as, BodyParseBehavior::AsJson) && !body_transform.value.is_empty() {
+            let json_body = parse_json_body(&mut ops)?;
+
+            ops.drain_request_body(u64::MAX.try_into().unwrap());
+            let ctx = minijinja::Value::from({
+                let mut m = BTreeMap::new();
+                if let JsonValue::Object(map) = json_body {
+                    for (k, v) in map {
+                        m.insert(k, minijinja::Value::from_serialize(&v));
+                    }
+                }
+                m
+            });
+
+            let rendered = match render(env, ctx, &body_transform.value,) {
+                Ok(str) => Some(str),
+                Err(e) => {
+                    errors.push(e);
+                    None
+                }
+            };
+
+            if rendered.as_deref().is_some_and(|s| !s.is_empty()) {
+                let rendered_body = rendered.as_deref().unwrap().as_bytes();
+                ops.set_request_header("content-length", rendered_body.len().to_string().as_bytes());
+                ops.append_request_body(rendered_body);
+            } else {
+                ops.set_request_header("content-length", b"0");
+            }
+        }
+    }
 
     for NameValuePair { name: key, value } in &transform.set {
         if value.is_empty() {
@@ -197,14 +242,14 @@ pub fn transform_request_headers<T: TransformationOps>(
         ops.remove_request_header(key);
     }
 
-    combine_errors("transform_request_headers()", errors)
+    combine_errors("transform_request()", errors)
 }
 
 /// Transform Resposne Headers
 ///
 /// On any rendering errors, we will remove the header and continue
 /// All the errors are collected and bubble up the chain so they can be logged
-pub fn transform_response_headers<T: TransformationOps>(
+pub fn transform_response_headers<'a, T: TransformationOps<'a>>(
     transform: &LocalTransform,
     env: &Environment<'static>,
     request_headers_map: &HashMap<String, String>,
