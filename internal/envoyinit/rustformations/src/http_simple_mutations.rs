@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{Result, Context};
 use envoy_proxy_dynamic_modules_rust_sdk::*;
 use lazy_static::lazy_static;
 use serde::Deserialize;
@@ -19,8 +19,6 @@ pub struct FilterConfig {
 
 struct EnvoyTransformationOps<'a> {
     envoy_filter: &'a mut dyn EnvoyHttpFilter,
-    cached_request_body_json: Option<JsonValue>,
-    cached_response_body_json: Option<JsonValue>,
     //    TODO: see comment for get_random_pattern() below
     //    random_pattern_map: &'a mut Option<HashMap<String, String>>,
 }
@@ -29,8 +27,6 @@ impl<'a> EnvoyTransformationOps<'a> {
     fn new(envoy_filter: &'a mut dyn EnvoyHttpFilter) -> EnvoyTransformationOps<'a> {
         EnvoyTransformationOps {
             envoy_filter,
-            cached_request_body_json: None,
-            cached_response_body_json: None,
         }
     }
 }
@@ -48,18 +44,13 @@ impl TransformationOps for EnvoyTransformationOps<'_> {
         self.envoy_filter.remove_response_header(key)
     }
     fn parse_request_json_body(&mut self) -> Result<JsonValue> {
-        if self.cached_request_body_json.is_none() {
-            if let Some(buffers) = self.envoy_filter.get_request_body() {
-                // TODO: implement Reader for EnvoyBuffer and use serde_json::from_reader to avoid making copy first?
-                let chunks: Vec<_> = buffers.iter().map(|b| b.as_slice()).collect();
-                let body = chunks.concat();
-                println!("parse_request_json_body: {:?}", body);
-                self.cached_request_body_json = serde_json::from_slice(&body)?;
-            } else {
-                self.cached_request_body_json = Some(JsonValue::Null)
-            }
-        }
-        Ok(self.cached_request_body_json.as_ref().unwrap().clone())
+        let Some(buffers) = self.envoy_filter.get_request_body() else {
+            return Ok(JsonValue::Null);
+        };
+        // TODO: implement Reader for EnvoyBuffer and use serde_json::from_reader to avoid making copy first?
+        let chunks: Vec<_> = buffers.iter().map(|b| b.as_slice()).collect();
+        let body = chunks.concat();
+        serde_json::from_slice(&body).context("failed to parse request body as json")
     }
     fn get_request_body(&mut self) -> Vec<u8> {
         if let Some(buffers) = self.envoy_filter.get_request_body() {
@@ -78,26 +69,22 @@ impl TransformationOps for EnvoyTransformationOps<'_> {
         self.envoy_filter.append_request_body(data)
     }
     fn parse_response_json_body(&mut self) -> Result<JsonValue> {
-        if self.cached_response_body_json.is_none() {
-            if let Some(buffers) = self.envoy_filter.get_response_body() {
-                // TODO: implement Reader for EnvoyBuffer and use serde_json::from_reader to avoid making copy first?
-                let chunks: Vec<_> = buffers.iter().map(|b| b.as_slice()).collect();
-                let body = chunks.concat();
-                self.cached_response_body_json = serde_json::from_slice(&body)?;
-            } else {
-                self.cached_response_body_json = Some(JsonValue::Null)
-            }
-        }
-        Ok(self.cached_response_body_json.as_ref().unwrap().clone())
+        let Some(buffers) = self.envoy_filter.get_response_body() else {
+            return Ok(JsonValue::Null);
+        };
+        // TODO: implement Reader for EnvoyBuffer and use serde_json::from_reader to avoid making copy first?
+        let chunks: Vec<_> = buffers.iter().map(|b| b.as_slice()).collect();
+        let body = chunks.concat();
+        serde_json::from_slice(&body).context("failed to parse response body as json")
     }
     fn get_response_body(&mut self) -> Vec<u8> {
-        if let Some(buffers) = self.envoy_filter.get_response_body() {
-            // TODO: implement Reader for EnvoyBuffer and use serde_json::from_reader to avoid making copy first?
-            let chunks: Vec<_> = buffers.iter().map(|b| b.as_slice()).collect();
-            chunks.concat();
-        }
+        let Some(buffers) = self.envoy_filter.get_response_body() else {
+            return Vec::default();
+        };    
 
-        Vec::default()
+        // TODO: implement Reader for EnvoyBuffer and use serde_json::from_reader to avoid making copy first?
+        let chunks: Vec<_> = buffers.iter().map(|b| b.as_slice()).collect();
+        chunks.concat()
     }
 
     fn drain_response_body(&mut self, number_of_bytes: usize) -> bool {
@@ -304,7 +291,7 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
         // TODO: need to test if we get called even if there is no transformation setting
         //       if yes, we need to short circuit here and return Continue
         if !end_of_stream {
-            envoy_log_error!("on_request_body not end_of_stream! Should not happen.");
+            envoy_log_error!("on_request_body not end_of_stream!");
             // TODO: Technically, we don't need to buffer the body yet as we don't support parsing the body now
             //       but it will be coming next. This is mimicking the C++ transformation filter behavior to
             //       always buffer the request body by default unless passthrough is set. Will revisit and consider
@@ -325,12 +312,43 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
         _end_of_stream: bool,
     ) -> abi::envoy_dynamic_module_type_on_http_filter_response_headers_status {
         envoy_log_trace!("on_response_headers");
+        if !_end_of_stream {
+            // TODO: this here always stop iteration to wait for the full request body,
+            //       need to support body passthrough
+            envoy_log_info!("on_response_headers buffering");
+            return abi::envoy_dynamic_module_type_on_http_filter_response_headers_status::StopIteration;
+        }
         self.set_per_route_config(envoy_filter);
         // TODO(nfuden): find someone who knows rust to see if we really need this Hash map for serialization
         self.populate_request_headers_map(envoy_filter.get_request_headers());
         self.transform_response(envoy_filter);
         abi::envoy_dynamic_module_type_on_http_filter_response_headers_status::Continue
     }
+
+    fn on_response_body(
+        &mut self,
+        envoy_filter: &mut EHF,
+        end_of_stream: bool,
+    ) -> abi::envoy_dynamic_module_type_on_http_filter_response_body_status {
+        envoy_log_info!("on_response_body");
+        // TODO: need to test if we get called even if there is no transformation setting
+        //       if yes, we need to short circuit here and return Continue
+        if !end_of_stream {
+            envoy_log_error!("on_response_body not end_of_stream!");
+            // TODO: Technically, we don't need to buffer the body yet as we don't support parsing the body now
+            //       but it will be coming next. This is mimicking the C++ transformation filter behavior to
+            //       always buffer the response body by default unless passthrough is set. Will revisit and consider
+            //       if this is the desired behavior when we implement parsing the body
+            return abi::envoy_dynamic_module_type_on_http_filter_response_body_status::StopIterationAndBuffer;
+        }
+
+        self.set_per_route_config(envoy_filter);
+        // TODO(nfuden): find someone who knows rust to see if we really need this Hash map for serialization
+        self.populate_request_headers_map(envoy_filter.get_request_headers());
+        self.transform_response(envoy_filter);
+        abi::envoy_dynamic_module_type_on_http_filter_response_body_status::Continue
+    }
+
 }
 
 #[cfg(test)]

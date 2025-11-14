@@ -16,6 +16,7 @@ use std::collections::HashMap;
 use std::env;
 
 const BODY: &str = "body";
+const CONTEXT: &str = "context";
 
 // substring can be called with either two or three arguments --
 // the first argument is the string to be modified, the second is the start position
@@ -121,6 +122,10 @@ fn body(state: &State) -> minijinja::Value {
     state.lookup(BODY).unwrap_or_default()
 }
 
+fn context(state: &State) -> minijinja::Value {
+    state.lookup(CONTEXT).unwrap_or_default()
+}
+
 pub fn new_jinja_env() -> Environment<'static> {
     let mut env = Environment::new();
 
@@ -152,15 +157,14 @@ pub fn new_jinja_env() -> Environment<'static> {
     // env.add_function("cluster_metadata", cluster_metadata);
 
     // !! Possibly not relevant old inja internal debug stuff
-    // env.add_function("context", context);
-    // env.add_function("env", env);
+    env.add_function("context", context);
 
     // specific.extend(self.route_specific.into_iter());
 
     env
 }
 
-fn render(env: &Environment<'static>, ctx: minijinja::Value, template: &str) -> Result<String> {
+fn render(env: &Environment<'static>, ctx: &minijinja::Value, template: &str) -> Result<String> {
     let tmpl = env
         .template_from_str(template)
         .with_context(|| format!("error creating jinja template {}", template))?;
@@ -208,6 +212,10 @@ pub fn transform_request<T: TransformationOps>(
 
             if json_body != JsonValue::Null {
                 println!("body_transform: got json body");
+                if body_transform.value.contains("context()") {
+                    m.insert(CONTEXT.to_string(), minijinja::Value::from_serialize(&json_body));
+                }
+
                 if let JsonValue::Object(map) = json_body {
                     for (k, v) in map {
                         println!(
@@ -218,6 +226,7 @@ pub fn transform_request<T: TransformationOps>(
                         m.insert(k, minijinja::Value::from_serialize(&v));
                     }
                 }
+
             }
         }
     }
@@ -234,7 +243,7 @@ pub fn transform_request<T: TransformationOps>(
     if let Some(body_transform) = transform.body.as_ref() {
         if !body_transform.value.is_empty() {
             ops.drain_request_body(u64::MAX.try_into().unwrap());
-            let rendered = match render(env, ctx.clone(), &body_transform.value) {
+            let rendered = match render(env, &ctx, &body_transform.value) {
                 Ok(str) => Some(str),
                 Err(e) => {
                     errors.push(e);
@@ -262,7 +271,7 @@ pub fn transform_request<T: TransformationOps>(
         }
         let rendered = match render(
             env,
-            ctx.clone(),
+            &ctx,
             value,
         ) {
             Ok(str) => Some(str),
@@ -313,6 +322,10 @@ pub fn transform_response<T: TransformationOps>(
 
             if json_body != JsonValue::Null {
                 println!("body_transform: got json body");
+                if body_transform.value.contains("context()") {
+                    m.insert(CONTEXT.to_string(), minijinja::Value::from_serialize(&json_body));
+                }
+
                 if let JsonValue::Object(map) = json_body {
                     for (k, v) in map {
                         println!(
@@ -342,7 +355,7 @@ pub fn transform_response<T: TransformationOps>(
             // than the content length. This is to avoid having to iterate through the buffer to
             // calculate the size.
             ops.drain_response_body(u64::MAX.try_into().unwrap());
-            let rendered = match render(env, ctx.clone(), &body_transform.value) {
+            let rendered = match render(env, &ctx, &body_transform.value) {
                 Ok(str) => Some(str),
                 Err(e) => {
                     errors.push(e);
@@ -370,7 +383,7 @@ pub fn transform_response<T: TransformationOps>(
         }
         let rendered = match render(
             env,
-            ctx.clone(),
+            &ctx,
             value,
         ) {
             Ok(str) => Some(str),

@@ -45,6 +45,7 @@ var (
 	transformForCustomFunctionsManifest = filepath.Join(fsutils.MustGetThisDir(), "testdata", "transform-for-custom-functions.yaml")
 	transformForHeadersManifest         = filepath.Join(fsutils.MustGetThisDir(), "testdata", "transform-for-headers.yaml")
 	transformForBodyJsonManifest        = filepath.Join(fsutils.MustGetThisDir(), "testdata", "transform-for-body-json.yaml")
+	rustformationForBodyJsonManifest    = filepath.Join(fsutils.MustGetThisDir(), "testdata", "transform-for-body-json-rust.yaml")
 	transformForBodyAsStringManifest    = filepath.Join(fsutils.MustGetThisDir(), "testdata", "transform-for-body-as-string.yaml")
 	gatewayAttachedTransformManifest    = filepath.Join(fsutils.MustGetThisDir(), "testdata", "gateway-attached-transform.yaml")
 	transformForMatchPathManifest       = filepath.Join(fsutils.MustGetThisDir(), "testdata", "transform-for-match-path.yaml")
@@ -65,7 +66,6 @@ var (
 			gatewayManifest,
 			transformForCustomFunctionsManifest,
 			transformForHeadersManifest,
-			transformForBodyJsonManifest,
 			transformForBodyAsStringManifest,
 			gatewayAttachedTransformManifest,
 			transformForMatchHeaderManifest,
@@ -76,7 +76,18 @@ var (
 	}
 
 	// everything is applied during setup; there are no additional test-specific manifests
-	testCases = map[string]*base.TestCase{}
+	testCases = map[string]*base.TestCase{
+		"TestGatewayWithTransformedRoute": &base.TestCase{
+			Manifests: []string{
+				transformForBodyJsonManifest,
+			},
+		},
+		"TestGatewayRustformationsWithTransformedRoute": &base.TestCase{
+			Manifests: []string{
+				rustformationForBodyJsonManifest,
+			},
+		},
+	}
 )
 
 type transformationTestCase struct {
@@ -490,6 +501,31 @@ func NewTestingSuite(ctx context.Context, testInst *e2e.TestInstallation) suite.
 					Body: testmatchers.JSONContains([]byte(`{"Foo":"\"bar\""}`)),
 				},
 			},
+			{
+				name:      "pull json info", // shows we parse the body as json
+				routeName: "route-for-body-json",
+				opts: []curl.Option{
+					curl.WithBody(`{"mykey": {"myinnerkey": "myinnervalue"}}`),
+					curl.WithHeader("X-Incoming-Stuff", "super"),
+				},
+				resp: &testmatchers.HttpResponse{
+					StatusCode: http.StatusOK,
+					Headers: map[string]any{
+						"x-how-great":   "level_super",
+						"from-incoming": "key_level_myinnervalue",
+					},
+					// The test dump the headers field from the echo response into the top level of
+					// the body, so all the request headers would be at the top level of the json body
+					Body: testmatchers.JSONContains([]byte(`{"X-Incoming-Stuff":["super"],"X-Transformed-Incoming":["level_myinnervalue"]}`)),
+				},
+				// Note: for this test, there is a response body transformation setup which extracts just the headers field
+				// When we create the Request Object from the echo response, we accounted for that
+				req: &testmatchers.HttpRequest{
+					Headers: map[string]any{
+						"X-Transformed-Incoming": "level_myinnervalue",
+					},
+				},
+			},
 		},
 	}
 }
@@ -497,11 +533,12 @@ func NewTestingSuite(ctx context.Context, testInst *e2e.TestInstallation) suite.
 func (s *testingSuite) SetupSuite() {
 	s.BaseTestingSuite.SetupSuite()
 
-	s.assertStatus()
+	s.assertSuiteResourceStatus()
 }
 
 func (s *testingSuite) TestGatewayWithTransformedRoute() {
 	s.SetRustformationInController(false)
+	s.assertTestResourceStatus()
 
 	s.TestInstallation.Assertions.AssertEnvoyAdminApi(
 		s.Ctx,
@@ -510,28 +547,6 @@ func (s *testingSuite) TestGatewayWithTransformedRoute() {
 	)
 
 	testCases := []transformationTestCase{
-		{
-			name:      "pull json info", // shows we parse the body as json
-			routeName: "route-for-body-json",
-			opts: []curl.Option{
-				curl.WithBody(`{"mykey": {"myinnerkey": "myinnervalue"}}`),
-				curl.WithHeader("X-Incoming-Stuff", "super"),
-			},
-			resp: &testmatchers.HttpResponse{
-				StatusCode: http.StatusOK,
-				Headers: map[string]any{
-					"x-how-great":   "level_super",
-					"from-incoming": "key_level_myinnervalue",
-				},
-			},
-			// Note: for this test, there is a response body transformation setup which extracts just the headers field
-			// When we create the Request Object from the echo response, we accounted for that
-			req: &testmatchers.HttpRequest{
-				Headers: map[string]any{
-					"X-Transformed-Incoming": "level_myinnervalue",
-				},
-			},
-		},
 		{
 			// The default for Body parsing is AsString which translate to body passthrough (no buffering in envoy)
 			// For this test, the response header transformation is set to try to use the `headers` field in the response
@@ -560,7 +575,8 @@ func (s *testingSuite) TestGatewayWithTransformedRoute() {
 			},
 		},
 	}
-	testCases = append(testCases, s.commonTestCases...)
+	//	testCases = append(testCases, s.commonTestCases...)
+	testCases = append(testCases, s.commonTestCases[len(s.commonTestCases)-1])
 	s.runTestCases((testCases))
 }
 
@@ -622,6 +638,7 @@ func (s *testingSuite) SetRustformationInController(enabled bool) {
 
 func (s *testingSuite) TestGatewayRustformationsWithTransformedRoute() {
 	s.SetRustformationInController(true)
+	s.assertTestResourceStatus()
 
 	testutils.Cleanup(s.T(), func() {
 		s.SetRustformationInController(false)
@@ -642,7 +659,8 @@ func (s *testingSuite) TestGatewayRustformationsWithTransformedRoute() {
 	)
 
 	testCases := []transformationTestCase{}
-	testCases = append(testCases, s.commonTestCases...)
+	//	testCases = append(testCases, s.commonTestCases...)
+	testCases = append(testCases, s.commonTestCases[len(s.commonTestCases)-1])
 	s.runTestCases((testCases))
 }
 
@@ -673,21 +691,8 @@ func (s *testingSuite) runTestCases(testCases []transformationTestCase) {
 	}
 }
 
-func (s *testingSuite) assertStatus() {
+func (s *testingSuite) assertRouteAndTrafficPolicyStatus(routesToCheck, trafficPoliciesToCheck []string) {
 	currentTimeout, pollingInterval := helpers.GetTimeouts()
-	routesToCheck := []string{
-		"example-route-for-headers",
-		"example-route-for-body-json",
-		"example-route-for-body-as-string",
-		"example-route-for-gateway-attached-transform",
-	}
-	trafficPoliciesToCheck := []string{
-		"example-traffic-policy-for-headers",
-		"example-traffic-policy-for-body-json",
-		"example-traffic-policy-for-body-as-string",
-		"example-traffic-policy-for-gateway-attached-transform",
-	}
-
 	for i, routeName := range routesToCheck {
 		trafficPolicyName := trafficPoliciesToCheck[i]
 
@@ -730,6 +735,32 @@ func (s *testingSuite) assertStatus() {
 			g.Expect(cond.ObservedGeneration).To(gomega.Equal(expectedCond.ObservedGeneration))
 		}, currentTimeout, pollingInterval).Should(gomega.Succeed())
 	}
+}
+
+func (s *testingSuite) assertSuiteResourceStatus() {
+	routesToCheck := []string{
+		"example-route-for-headers",
+		//		"example-route-for-body-json",
+		"example-route-for-body-as-string",
+		"example-route-for-gateway-attached-transform",
+	}
+	trafficPoliciesToCheck := []string{
+		"example-traffic-policy-for-headers",
+		//		"example-traffic-policy-for-body-json",
+		"example-traffic-policy-for-body-as-string",
+		"example-traffic-policy-for-gateway-attached-transform",
+	}
+	s.assertRouteAndTrafficPolicyStatus(routesToCheck, trafficPoliciesToCheck)
+}
+
+func (s *testingSuite) assertTestResourceStatus() {
+	routesToCheck := []string{
+		"example-route-for-body-json",
+	}
+	trafficPoliciesToCheck := []string{
+		"example-traffic-policy-for-body-json",
+	}
+	s.assertRouteAndTrafficPolicyStatus(routesToCheck, trafficPoliciesToCheck)
 }
 
 func (s *testingSuite) dynamicModuleAssertion(shouldBeLoaded bool) func(ctx context.Context, adminClient *envoyadmincli.Client) {

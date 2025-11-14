@@ -71,6 +71,7 @@ func CreateRequestFromHttpBinResponse(r io.ReadCloser) (*http.Request, error) {
 		// some transformation tests extract just the headers field from the original echo
 		// response and return that as the json body, so just try parse that as a map of key
 		// and value and put that into Headers
+		fmt.Printf("json bytes:\n%s\n", string(bytes))
 		var m map[string][]string
 		if err := json.Unmarshal(bytes, &m); err != nil {
 			return nil, err
