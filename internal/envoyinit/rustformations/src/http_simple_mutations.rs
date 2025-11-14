@@ -61,6 +61,16 @@ impl TransformationOps for EnvoyTransformationOps<'_> {
         }
         Ok(self.cached_request_body_json.as_ref().unwrap().clone())
     }
+    fn get_request_body(&mut self) -> Vec<u8> {
+        if let Some(buffers) = self.envoy_filter.get_request_body() {
+            // TODO: implement Reader for EnvoyBuffer and use serde_json::from_reader to avoid making copy first?
+            let chunks: Vec<_> = buffers.iter().map(|b| b.as_slice()).collect();
+            chunks.concat();
+        }
+
+        Vec::default()
+    }
+
     fn drain_request_body(&mut self, number_of_bytes: usize) -> bool {
         self.envoy_filter.drain_request_body(number_of_bytes)
     }
@@ -80,6 +90,16 @@ impl TransformationOps for EnvoyTransformationOps<'_> {
         }
         Ok(self.cached_response_body_json.as_ref().unwrap().clone())
     }
+    fn get_response_body(&mut self) -> Vec<u8> {
+        if let Some(buffers) = self.envoy_filter.get_response_body() {
+            // TODO: implement Reader for EnvoyBuffer and use serde_json::from_reader to avoid making copy first?
+            let chunks: Vec<_> = buffers.iter().map(|b| b.as_slice()).collect();
+            chunks.concat();
+        }
+
+        Vec::default()
+    }
+
     fn drain_response_body(&mut self, number_of_bytes: usize) -> bool {
         self.envoy_filter.drain_response_body(number_of_bytes)
     }

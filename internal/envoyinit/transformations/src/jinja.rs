@@ -15,6 +15,8 @@ use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::env;
 
+const BODY: &str = "body";
+
 // substring can be called with either two or three arguments --
 // the first argument is the string to be modified, the second is the start position
 // of the substring, and the optional third argument is the length of the substring.
@@ -23,7 +25,7 @@ use std::env;
 fn substring(input: &str, start: usize, len: Option<usize>) -> String {
     let input_len = input.len();
     if start >= input_len {
-        return "".to_string();
+        return String::default();
     }
 
     let mut end = input_len;
@@ -39,11 +41,11 @@ fn substring(input: &str, start: usize, len: Option<usize>) -> String {
 fn header(state: &State, key: &str) -> String {
     let headers = state.lookup("headers");
     let Some(headers) = headers else {
-        return "".to_string();
+        return String::default();
     };
 
     let Some(header_map) = <HashMap<String, String>>::deserialize(headers.clone()).ok() else {
-        return "".to_string();
+        return String::default();
     };
 
     header_map.get(key).cloned().unwrap_or_default()
@@ -52,11 +54,11 @@ fn header(state: &State, key: &str) -> String {
 fn request_header(state: &State, key: &str) -> String {
     let headers = state.lookup("request_headers");
     let Some(headers) = headers else {
-        return "".to_string();
+        return String::default();
     };
 
     let Some(header_map) = <HashMap<String, String>>::deserialize(headers.clone()).ok() else {
-        return "".to_string();
+        return String::default();
     };
     header_map.get(key).cloned().unwrap_or_default()
 }
@@ -80,7 +82,7 @@ fn raw_string(value: &str) -> String {
     // code)
     match serde_json::to_string(value) {
         Ok(s) => trim_outer_quotes(&s).to_string(),
-        Err(_) => "".to_string()
+        Err(_) => String::default()
     }
 }
 
@@ -97,10 +99,7 @@ fn base64_decode(input: &str) -> String {
 }
 
 fn get_env(env_var: &str) -> String {
-    match env::var(env_var) {
-        Ok(val) => val,
-        Err(_e) => "".to_string(),
-    }
+    env::var(env_var).unwrap_or_default()
 }
 
 fn replace_with_random(input: &str, to_replace: &str) -> String {
@@ -116,6 +115,10 @@ fn replace_with_random(input: &str, to_replace: &str) -> String {
 
     let pattern = STANDARD_NO_PAD.encode(random);
     input.replace(to_replace, &pattern)
+}
+
+fn body(state: &State) -> minijinja::Value {
+    state.lookup(BODY).unwrap_or_default()
 }
 
 pub fn new_jinja_env() -> Environment<'static> {
@@ -138,7 +141,7 @@ pub fn new_jinja_env() -> Environment<'static> {
     env.add_function("header", header);
     env.add_function("request_header", request_header);
     // env.add_function("extraction", extraction);
-    // env.add_function("body", body);
+    env.add_function(BODY, body);
     // env.add_function("dynamic_metadata", dynamic_metadata);
 
     // !! Datasource Puller needed
@@ -192,7 +195,8 @@ pub fn transform_request<T: TransformationOps>(
 ) -> Result<()> {
     let mut errors = Vec::new();
 
-    let mut m = BTreeMap::new();
+//    let mut m = BTreeMap::new();
+    let mut m = HashMap::new();
     // for request rendering, both the header() and request_header() use the request_headers
     // so, setting both to the request_headers_map in the context
     m.insert("headers".to_string(), minijinja::Value::from_serialize(request_headers_map));
@@ -215,6 +219,13 @@ pub fn transform_request<T: TransformationOps>(
                     }
                 }
             }
+        }
+    }
+
+    if let Some(body_transform) = transform.body.as_ref() {
+        if body_transform.value.contains("body()") {
+            let body = ops.get_request_body();
+            m.insert(BODY.to_string(), minijinja::Value::from_serialize(&body));
         }
     }
 
@@ -313,6 +324,13 @@ pub fn transform_response<T: TransformationOps>(
                     }
                 }
             }
+        }
+    }
+
+    if let Some(body_transform) = transform.body.as_ref() {
+        if body_transform.value.contains("body()") {
+            let body = ops.get_request_body();
+            m.insert(BODY.to_string(), minijinja::Value::from_serialize(&body));
         }
     }
 
