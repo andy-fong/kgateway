@@ -7,7 +7,7 @@ use base64::{
     engine::general_purpose::{STANDARD, STANDARD_NO_PAD},
     Engine,
 };
-use minijinja::{context, Environment, State};
+use minijinja::{Environment, State};
 use rand::Rng;
 use serde::Deserialize;
 use serde_json::Value as JsonValue;
@@ -71,11 +71,11 @@ fn trim_outer_quotes(s: &str) -> &str {
 
 fn raw_string(value: &str) -> String {
     // Not sure if this is exactly the correct behavior for this function. In the C++ version,
-    // the native json object can be added to the context directly and that json object can dump 
+    // the native json object can be added to the context directly and that json object can dump
     // out the raw string without un-escaping. Here, it's several layers of deserializing and serializing
-    // from serde_json::from_slice() -> constructing a BTreeMap -> adding that to the context. 
-    // There is no way to get back the original raw_string. So, escaping the string again is the closest I 
-    // can get. After escaping, the resulting string has extra double quote around the original string, so 
+    // from serde_json::from_slice() -> constructing a BTreeMap -> adding that to the context.
+    // There is no way to get back the original raw_string. So, escaping the string again is the closest I
+    // can get. After escaping, the resulting string has extra double quote around the original string, so
     // need to trim them (somehow the need for trimming the double quotes is exactly the same in the C++
     // code)
     match serde_json::to_string(value) {
@@ -182,8 +182,8 @@ fn combine_errors(msg: &str, errors: Vec<Error>) -> Result<()> {
 ///
 /// On any header rendering errors, we will remove the header and continue
 /// All the errors are collected and bubble up the chain so they can be logged
-/// On body parsing as json error, we return error immediately so we can send a 
-/// 400 response back 
+/// On body parsing as json error, we return error immediately so we can send a
+/// 400 response back
 pub fn transform_request<T: TransformationOps>(
     transform: &LocalTransform,
     env: &Environment<'static>,
@@ -241,7 +241,7 @@ pub fn transform_request<T: TransformationOps>(
                 ops.set_request_header("content-length", b"0");
             }
         }
-    } 
+    }
 
     for NameValuePair { name: key, value } in &transform.set {
         if value.is_empty() {
@@ -290,6 +290,60 @@ pub fn transform_response<T: TransformationOps>(
 ) -> Result<()> {
     let mut errors = Vec::new();
 
+    let mut m = BTreeMap::new();
+    // for response rendering, header() uses response_headers and request_header()
+    // uses the request_headers. So, setting them in the context accordingly
+    m.insert("headers".to_string(), minijinja::Value::from_serialize(response_headers_map));
+    m.insert("request_headers".to_string(), minijinja::Value::from_serialize(request_headers_map));
+    if let Some(body_transform) = transform.body.as_ref() {
+        if matches!(body_transform.parse_as, BodyParseBehavior::AsJson) {
+            println!("body_transform: {}", body_transform.value);
+            let json_body = ops.parse_response_json_body()?;
+
+            if json_body != JsonValue::Null {
+                println!("body_transform: got json body");
+                if let JsonValue::Object(map) = json_body {
+                    for (k, v) in map {
+                        println!(
+                            "body_transform: {} = {}",
+                            k,
+                            minijinja::Value::from_serialize(&v)
+                        );
+                        m.insert(k, minijinja::Value::from_serialize(&v));
+                    }
+                }
+            }
+        }
+    }
+
+    let ctx = minijinja::Value::from(m);
+
+    if let Some(body_transform) = transform.body.as_ref() {
+        if !body_transform.value.is_empty() {
+            // The envoy sdk function would drain all the bytes if the number passed in is greater
+            // than the content length. This is to avoid having to iterate through the buffer to
+            // calculate the size.
+            ops.drain_response_body(u64::MAX.try_into().unwrap());
+            let rendered = match render(env, ctx.clone(), &body_transform.value) {
+                Ok(str) => Some(str),
+                Err(e) => {
+                    errors.push(e);
+                    None
+                }
+            };
+            if rendered.as_deref().is_some_and(|s| !s.is_empty()) {
+                let rendered_body = rendered.as_deref().unwrap().as_bytes();
+                ops.set_response_header(
+                    "content-length",
+                    rendered_body.len().to_string().as_bytes(),
+                );
+                ops.append_response_body(rendered_body);
+            } else {
+                ops.set_response_header("content-length", b"0");
+            }
+        }
+    }
+
     for NameValuePair { name: key, value } in &transform.set {
         if value.is_empty() {
             // This is following the legacy transformation filter behavior
@@ -298,9 +352,7 @@ pub fn transform_response<T: TransformationOps>(
         }
         let rendered = match render(
             env,
-            // for response rendering, header() uses response_headers and request_header()
-            // uses the request_headers. So, setting them in the context accordingly
-            context!(headers => response_headers_map, request_headers => request_headers_map),
+            ctx.clone(),
             value,
         ) {
             Ok(str) => Some(str),
