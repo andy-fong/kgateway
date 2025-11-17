@@ -1,6 +1,7 @@
 use crate::BodyParseBehavior;
 use crate::LocalTransform;
 use crate::NameValuePair;
+use crate::TransformationError;
 use crate::TransformationOps;
 use anyhow::{Context, Error, Result};
 use base64::{
@@ -83,7 +84,7 @@ fn raw_string(value: &str) -> String {
     // code)
     match serde_json::to_string(value) {
         Ok(s) => trim_outer_quotes(&s).to_string(),
-        Err(_) => String::default()
+        Err(_) => String::default(),
     }
 }
 
@@ -164,10 +165,22 @@ pub fn new_jinja_env() -> Environment<'static> {
     env
 }
 
-fn render(env: &Environment<'static>, ctx: &minijinja::Value, template: &str) -> Result<String> {
+fn render(
+    env: &Environment<'static>,
+    ctx: &minijinja::Value,
+    template: &str,
+    parsed_body_as_json: bool,
+) -> Result<String> {
     let tmpl = env
         .template_from_str(template)
         .with_context(|| format!("error creating jinja template {}", template))?;
+    if !parsed_body_as_json && !tmpl.undeclared_variables(false).is_empty() {
+        return Err(TransformationError::UndeclaredJsonVariables(format!(
+            "from template {}",
+            template
+        ))
+        .into());
+    }
     tmpl.render(ctx)
         .with_context(|| format!("error rendering jinja template {}", template))
 }
@@ -199,12 +212,19 @@ pub fn transform_request<T: TransformationOps>(
 ) -> Result<()> {
     let mut errors = Vec::new();
 
-//    let mut m = BTreeMap::new();
+    //    let mut m = BTreeMap::new();
     let mut m = HashMap::new();
     // for request rendering, both the header() and request_header() use the request_headers
     // so, setting both to the request_headers_map in the context
-    m.insert("headers".to_string(), minijinja::Value::from_serialize(request_headers_map));
-    m.insert("request_headers".to_string(), minijinja::Value::from_serialize(request_headers_map));
+    m.insert(
+        "headers".to_string(),
+        minijinja::Value::from_serialize(request_headers_map),
+    );
+    m.insert(
+        "request_headers".to_string(),
+        minijinja::Value::from_serialize(request_headers_map),
+    );
+    let mut parsed_body_as_json = false;
     if let Some(body_transform) = transform.body.as_ref() {
         if matches!(body_transform.parse_as, BodyParseBehavior::AsJson) {
             println!("body_transform: {}", body_transform.value);
@@ -213,7 +233,10 @@ pub fn transform_request<T: TransformationOps>(
             if json_body != JsonValue::Null {
                 println!("body_transform: got json body");
                 if body_transform.value.contains("context()") {
-                    m.insert(CONTEXT.to_string(), minijinja::Value::from_serialize(&json_body));
+                    m.insert(
+                        CONTEXT.to_string(),
+                        minijinja::Value::from_serialize(&json_body),
+                    );
                 }
 
                 if let JsonValue::Object(map) = json_body {
@@ -227,6 +250,7 @@ pub fn transform_request<T: TransformationOps>(
                     }
                 }
 
+                parsed_body_as_json = true;
             }
         }
     }
@@ -243,7 +267,7 @@ pub fn transform_request<T: TransformationOps>(
     if let Some(body_transform) = transform.body.as_ref() {
         if !body_transform.value.is_empty() {
             ops.drain_request_body(u64::MAX.try_into().unwrap());
-            let rendered = match render(env, &ctx, &body_transform.value) {
+            let rendered = match render(env, &ctx, &body_transform.value, parsed_body_as_json) {
                 Ok(str) => Some(str),
                 Err(e) => {
                     errors.push(e);
@@ -259,27 +283,40 @@ pub fn transform_request<T: TransformationOps>(
                 ops.append_request_body(rendered_body);
             } else {
                 ops.set_request_header("content-length", b"0");
+                // In classic transformation, we remove content-type only when "passthrough_body"
+                // is set to true (even the body is not transformed but it comes in as 0 bytes)
+                // Here, we are only removing content-type if we have an override that ended up
+                // removing the body as we don't have passthrough_body setting in kgateway
+                ops.remove_request_header("content-type");
             }
         }
     }
 
+    let mut abort_processing = false;
     for NameValuePair { name: key, value } in &transform.set {
         if value.is_empty() {
-            // This is following the legacy transformation filter behavior
+            // This is following the classic transformation filter behavior
             ops.remove_request_header(key);
             continue;
         }
-        let rendered = match render(
-            env,
-            &ctx,
-            value,
-        ) {
+        let rendered = match render(env, &ctx, value, parsed_body_as_json) {
             Ok(str) => Some(str),
-            Err(e) => {
-                errors.push(e);
+            Err(err) => {
+                if let Some(e) = err.downcast_ref::<TransformationError>() {
+                    match e {
+                        TransformationError::UndeclaredJsonVariables(_) => {
+                            abort_processing = true;
+                        }
+                    }
+                } 
+                errors.push(err);
                 None
             }
         };
+
+        if abort_processing {
+            return Err(errors.pop().unwrap());
+        }
 
         if rendered.as_deref().is_some_and(|s| !s.is_empty()) {
             ops.set_request_header(key, rendered.as_deref().unwrap().as_bytes());
@@ -313,8 +350,15 @@ pub fn transform_response<T: TransformationOps>(
     let mut m = BTreeMap::new();
     // for response rendering, header() uses response_headers and request_header()
     // uses the request_headers. So, setting them in the context accordingly
-    m.insert("headers".to_string(), minijinja::Value::from_serialize(response_headers_map));
-    m.insert("request_headers".to_string(), minijinja::Value::from_serialize(request_headers_map));
+    m.insert(
+        "headers".to_string(),
+        minijinja::Value::from_serialize(response_headers_map),
+    );
+    m.insert(
+        "request_headers".to_string(),
+        minijinja::Value::from_serialize(request_headers_map),
+    );
+    let mut parsed_body_as_json = false;
     if let Some(body_transform) = transform.body.as_ref() {
         if matches!(body_transform.parse_as, BodyParseBehavior::AsJson) {
             println!("body_transform: {}", body_transform.value);
@@ -323,7 +367,10 @@ pub fn transform_response<T: TransformationOps>(
             if json_body != JsonValue::Null {
                 println!("body_transform: got json body");
                 if body_transform.value.contains("context()") {
-                    m.insert(CONTEXT.to_string(), minijinja::Value::from_serialize(&json_body));
+                    m.insert(
+                        CONTEXT.to_string(),
+                        minijinja::Value::from_serialize(&json_body),
+                    );
                 }
 
                 if let JsonValue::Object(map) = json_body {
@@ -336,6 +383,7 @@ pub fn transform_response<T: TransformationOps>(
                         m.insert(k, minijinja::Value::from_serialize(&v));
                     }
                 }
+                parsed_body_as_json = true;
             }
         }
     }
@@ -355,7 +403,7 @@ pub fn transform_response<T: TransformationOps>(
             // than the content length. This is to avoid having to iterate through the buffer to
             // calculate the size.
             ops.drain_response_body(u64::MAX.try_into().unwrap());
-            let rendered = match render(env, &ctx, &body_transform.value) {
+            let rendered = match render(env, &ctx, &body_transform.value, parsed_body_as_json) {
                 Ok(str) => Some(str),
                 Err(e) => {
                     errors.push(e);
@@ -371,27 +419,40 @@ pub fn transform_response<T: TransformationOps>(
                 ops.append_response_body(rendered_body);
             } else {
                 ops.set_response_header("content-length", b"0");
+                // In classic transformation, we remove content-type only when "passthrough_body"
+                // is set to true (even the body is not transformed but it comes in as 0 bytes)
+                // Here, we are only removing content-type if we have an override that ended up
+                // removing the body as we don't have passthrough_body setting in kgateway
+                ops.remove_response_header("content-type");
             }
         }
     }
 
+    let mut abort_processing = false;
     for NameValuePair { name: key, value } in &transform.set {
         if value.is_empty() {
-            // This is following the legacy transformation filter behavior
+            // This is following the classic transformation filter behavior
             ops.remove_response_header(key);
             continue;
         }
-        let rendered = match render(
-            env,
-            &ctx,
-            value,
-        ) {
+        let rendered = match render(env, &ctx, value, parsed_body_as_json) {
             Ok(str) => Some(str),
-            Err(e) => {
-                errors.push(e);
+            Err(err) => {
+                if let Some(e) = err.downcast_ref::<TransformationError>() {
+                    match e {
+                        TransformationError::UndeclaredJsonVariables(_) => {
+                            abort_processing = true;
+                        }
+                    }
+                } 
+                errors.push(err);
                 None
             }
         };
+
+        if abort_processing {
+            return Err(errors.pop().unwrap());
+        }
 
         if rendered.as_deref().is_some_and(|s| !s.is_empty()) {
             ops.set_response_header(key, rendered.as_deref().unwrap().as_bytes());

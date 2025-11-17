@@ -75,7 +75,20 @@ var (
 		},
 	}
 
-	// everything is applied during setup; there are no additional test-specific manifests
+	// Because the jinja template syntax are slightly different between C++ and rust when
+	// accessing the json object after parsing the body as json, we need to use different
+	// resources for the same test case when switching between the C++ (classic transformation)
+	// and Rust (rustformation). Also because there is no hook in the testsuite frame work
+	// to run custom function right before applying the resource, if you look at the log from envoy
+	// you will see something like this:
+	// [2025-11-17 15:37:40.956][1][warning][config]
+	// [external/envoy/source/extensions/config_subscription/grpc/grpc_subscription_impl.cc:138]
+	// gRPC config for type.googleapis.com/envoy.config.route.v3.RouteConfiguration rejected:
+	// Failed to parse response template: Failed to parse header template 'from-incoming':
+	// [inja.exception.parser_error] (at 1:67) malformed expression
+	// This is because envoy is still configured to use the classic transformation while the rust
+	// specific resource is applied. Once the rust test starts, it will switch envoy to the
+	// rust dynamic module filter and the route will be accepted (and the error will go away)
 	testCases = map[string]*base.TestCase{
 		"TestGatewayWithTransformedRoute": &base.TestCase{
 			Manifests: []string{
@@ -526,6 +539,23 @@ func NewTestingSuite(ctx context.Context, testInst *e2e.TestInstallation) suite.
 					},
 				},
 			},
+			{
+				// The default for Body parsing is AsString which translate to body passthrough (no buffering in envoy)
+				// For this test, the response header transformation is set to try to use the `headers` field in the response
+				// json body, because the body is never parse, so `headers` is undefine and envoy returns 400 response
+				name:      "dont pull info if we dont parse json",
+				routeName: "route-for-body",
+				opts: []curl.Option{
+					curl.WithBody(`{"mykey": {"myinnerkey": "myinnervalue"}}`),
+					curl.WithHeader("X-Incoming-Stuff", "super"),
+				},
+				resp: &testmatchers.HttpResponse{
+					StatusCode: http.StatusBadRequest, // bad transformation results in 400
+					NotHeaders: []string{
+						"x-how-great",
+					},
+				},
+			},
 		},
 	}
 }
@@ -548,23 +578,6 @@ func (s *testingSuite) TestGatewayWithTransformedRoute() {
 
 	testCases := []transformationTestCase{
 		{
-			// The default for Body parsing is AsString which translate to body passthrough (no buffering in envoy)
-			// For this test, the response header transformation is set to try to use the `headers` field in the response
-			// json body, because the body is never parse, so `headers` is undefine and envoy returns 400 response
-			name:      "dont pull info if we dont parse json",
-			routeName: "route-for-body",
-			opts: []curl.Option{
-				curl.WithBody(`{"mykey": {"myinnerkey": "myinnervalue"}}`),
-				curl.WithHeader("X-Incoming-Stuff", "super"),
-			},
-			resp: &testmatchers.HttpResponse{
-				StatusCode: http.StatusBadRequest, // bad transformation results in 400
-				NotHeaders: []string{
-					"x-how-great",
-				},
-			},
-		},
-		{
 			name:      "dont pull json info if not json", // shows we parse the body as json
 			routeName: "route-for-body-json",
 			opts: []curl.Option{
@@ -575,8 +588,8 @@ func (s *testingSuite) TestGatewayWithTransformedRoute() {
 			},
 		},
 	}
-	testCases = append(testCases, s.commonTestCases...)
-	// testCases = append(testCases, s.commonTestCases[len(s.commonTestCases)-1])
+	// testCases = append(testCases, s.commonTestCases...)
+	testCases = append(testCases, s.commonTestCases[len(s.commonTestCases)-1])
 	s.runTestCases((testCases))
 }
 
@@ -659,8 +672,8 @@ func (s *testingSuite) TestGatewayRustformationsWithTransformedRoute() {
 	)
 
 	testCases := []transformationTestCase{}
-	testCases = append(testCases, s.commonTestCases...)
-	// testCases = append(testCases, s.commonTestCases[len(s.commonTestCases)-1])
+	// testCases = append(testCases, s.commonTestCases...)
+	testCases = append(testCases, s.commonTestCases[len(s.commonTestCases)-1])
 	s.runTestCases((testCases))
 }
 

@@ -1,10 +1,10 @@
-use anyhow::{Result, Context};
+use anyhow::{Context, Result};
 use envoy_proxy_dynamic_modules_rust_sdk::*;
 use lazy_static::lazy_static;
 use serde::Deserialize;
 use serde_json::Value as JsonValue;
 use std::collections::HashMap;
-use transformations::{LocalTransformationConfig, TransformationOps};
+use transformations::{LocalTransformationConfig, TransformationError, TransformationOps};
 
 #[cfg(test)]
 use mockall::*;
@@ -25,9 +25,7 @@ struct EnvoyTransformationOps<'a> {
 
 impl<'a> EnvoyTransformationOps<'a> {
     fn new(envoy_filter: &'a mut dyn EnvoyHttpFilter) -> EnvoyTransformationOps<'a> {
-        EnvoyTransformationOps {
-            envoy_filter,
-        }
+        EnvoyTransformationOps { envoy_filter }
     }
 }
 impl TransformationOps for EnvoyTransformationOps<'_> {
@@ -47,6 +45,10 @@ impl TransformationOps for EnvoyTransformationOps<'_> {
         let Some(buffers) = self.envoy_filter.get_request_body() else {
             return Ok(JsonValue::Null);
         };
+
+        if buffers.is_empty() {
+            return Ok(JsonValue::Null);
+        }
         // TODO: implement Reader for EnvoyBuffer and use serde_json::from_reader to avoid making copy first?
         let chunks: Vec<_> = buffers.iter().map(|b| b.as_slice()).collect();
         let body = chunks.concat();
@@ -80,7 +82,7 @@ impl TransformationOps for EnvoyTransformationOps<'_> {
     fn get_response_body(&mut self) -> Vec<u8> {
         let Some(buffers) = self.envoy_filter.get_response_body() else {
             return Vec::default();
-        };    
+        };
 
         // TODO: implement Reader for EnvoyBuffer and use serde_json::from_reader to avoid making copy first?
         let chunks: Vec<_> = buffers.iter().map(|b| b.as_slice()).collect();
@@ -234,7 +236,7 @@ impl Filter {
         }
     }
 
-    fn transform_response<EHF: EnvoyHttpFilter>(&self, envoy_filter: &mut EHF) {
+    fn transform_response<EHF: EnvoyHttpFilter>(&self, envoy_filter: &mut EHF) -> bool {
         let response_transform = match self.get_per_route_config() {
             Some(config) => &config.transformations.response,
             None => &self.filter_config.transformations.response,
@@ -244,16 +246,31 @@ impl Filter {
             // TODO(nfuden): find someone who knows rust to see if we really need this Hash map for serialization
             let response_headers_map = self.create_headers_map(envoy_filter.get_response_headers());
 
-            if let Err(e) = transformations::jinja::transform_response(
+            match transformations::jinja::transform_response(
                 transform,
                 &self.env,
                 self.get_request_headers_map(),
                 &response_headers_map,
                 EnvoyTransformationOps::new(envoy_filter),
             ) {
-                envoy_log_warn!("{e}");
+                Ok(()) => {}
+                Err(err) => {
+                    if let Some(e) = err.downcast_ref::<TransformationError>() {
+                        match e {
+                            TransformationError::UndeclaredJsonVariables(msg) => {
+                                envoy_log_error!("{msg}");
+                                envoy_filter.send_response(400, Vec::default(), None);
+                                return false;
+                            }
+                        }
+                    } else {
+                        envoy_log_warn!("{err}");
+                    }
+                }
             }
         }
+
+        true
     }
 }
 
@@ -321,8 +338,10 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
         self.set_per_route_config(envoy_filter);
         // TODO(nfuden): find someone who knows rust to see if we really need this Hash map for serialization
         self.populate_request_headers_map(envoy_filter.get_request_headers());
-        self.transform_response(envoy_filter);
-        abi::envoy_dynamic_module_type_on_http_filter_response_headers_status::Continue
+        if self.transform_response(envoy_filter) {
+            return abi::envoy_dynamic_module_type_on_http_filter_response_headers_status::Continue;
+        }
+        abi::envoy_dynamic_module_type_on_http_filter_response_headers_status::StopIteration
     }
 
     fn on_response_body(
@@ -345,10 +364,11 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
         self.set_per_route_config(envoy_filter);
         // TODO(nfuden): find someone who knows rust to see if we really need this Hash map for serialization
         self.populate_request_headers_map(envoy_filter.get_request_headers());
-        self.transform_response(envoy_filter);
-        abi::envoy_dynamic_module_type_on_http_filter_response_body_status::Continue
+        if self.transform_response(envoy_filter) {
+            return abi::envoy_dynamic_module_type_on_http_filter_response_body_status::Continue;
+        }
+        abi::envoy_dynamic_module_type_on_http_filter_response_body_status::StopIterationAndBuffer
     }
-
 }
 
 #[cfg(test)]

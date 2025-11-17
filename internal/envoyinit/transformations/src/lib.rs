@@ -60,3 +60,9 @@ pub trait TransformationOps {
     fn drain_response_body(&mut self, number_of_bytes: usize) -> bool;
     fn append_response_body(&mut self, data: &[u8]) -> bool;
 }
+
+#[derive(thiserror::Error, Debug)]
+pub enum TransformationError {
+    #[error("undeclared json variables: {0}")]
+    UndeclaredJsonVariables(String),
+}
