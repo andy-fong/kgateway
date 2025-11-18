@@ -587,8 +587,8 @@ func (s *testingSuite) TestGatewayWithTransformedRoute() {
 	)
 
 	testCases := []transformationTestCase{}
-	// testCases = append(testCases, s.commonTestCases...)
-	testCases = append(testCases, s.commonTestCases[len(s.commonTestCases)-1])
+	testCases = append(testCases, s.commonTestCases...)
+	//	testCases = append(testCases, s.commonTestCases[len(s.commonTestCases)-1])
 	s.runTestCases((testCases))
 }
 
@@ -671,8 +671,8 @@ func (s *testingSuite) TestGatewayRustformationsWithTransformedRoute() {
 	)
 
 	testCases := []transformationTestCase{}
-	// testCases = append(testCases, s.commonTestCases...)
-	testCases = append(testCases, s.commonTestCases[len(s.commonTestCases)-1])
+	testCases = append(testCases, s.commonTestCases...)
+	//	testCases = append(testCases, s.commonTestCases[len(s.commonTestCases)-1])
 	s.runTestCases((testCases))
 }
 

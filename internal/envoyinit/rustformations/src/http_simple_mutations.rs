@@ -1,17 +1,16 @@
 use anyhow::{Context, Result};
 use envoy_proxy_dynamic_modules_rust_sdk::*;
-use lazy_static::lazy_static;
+use once_cell::sync::Lazy;
 use serde::Deserialize;
 use serde_json::Value as JsonValue;
 use std::collections::HashMap;
+use std::sync::Arc;
 use transformations::{LocalTransformationConfig, TransformationError, TransformationOps};
 
 #[cfg(test)]
 use mockall::*;
 
-lazy_static! {
-    static ref EMPTY_MAP: HashMap<String, String> = HashMap::new();
-}
+static EMPTY_MAP: Lazy<HashMap<String, String>> = Lazy::new(HashMap::new);
 #[derive(Deserialize, Clone)]
 pub struct FilterConfig {
     transformations: LocalTransformationConfig,
@@ -146,10 +145,11 @@ pub type PerRouteConfig = FilterConfig;
 impl<EHF: EnvoyHttpFilter> HttpFilterConfig<EHF> for FilterConfig {
     /// This is called for each new HTTP filter.
     fn new_http_filter(&mut self, _envoy: &mut EHF) -> Box<dyn HttpFilter<EHF>> {
+        envoy_log_info!("new_http_filter");
         Box::new(Filter {
             filter_config: self.clone(),
             per_route_config: None,
-            env: transformations::jinja::new_jinja_env(),
+            env: transformations::jinja::ENV.clone(),
             request_headers_map: None,
         })
     }
@@ -158,7 +158,7 @@ impl<EHF: EnvoyHttpFilter> HttpFilterConfig<EHF> for FilterConfig {
 pub struct Filter {
     filter_config: FilterConfig,
     per_route_config: Option<Box<PerRouteConfig>>,
-    env: minijinja::Environment<'static>,
+    env: Arc<minijinja::Environment<'static>>,
     request_headers_map: Option<HashMap<String, String>>,
 }
 
@@ -234,14 +234,14 @@ impl Filter {
                 Err(err) => {
                     if let Some(e) = err.downcast_ref::<TransformationError>() {
                         match e {
-                            TransformationError::UndeclaredJsonVariables(msg) => {
-                                envoy_log_error!("{msg}");
+                            TransformationError::UndeclaredJsonVariables(_msg) => {
+                                envoy_log_error!("{err}");
                                 envoy_filter.send_response(400, Vec::default(), None);
                                 return false;
                             }
                         }
                     } else if let Some(e) = err.downcast_ref::<serde_json::error::Error>() {
-                        envoy_log_error!("{e}");
+                        envoy_log_error!("json parsing error: {e}");
                         envoy_filter.send_response(400, Vec::default(), None);
                         return false;
                     } else {
@@ -275,14 +275,14 @@ impl Filter {
                 Err(err) => {
                     if let Some(e) = err.downcast_ref::<TransformationError>() {
                         match e {
-                            TransformationError::UndeclaredJsonVariables(msg) => {
-                                envoy_log_error!("{msg}");
+                            TransformationError::UndeclaredJsonVariables(_msg) => {
+                                envoy_log_error!("{err}");
                                 envoy_filter.send_response(400, Vec::default(), None);
                                 return false;
                             }
                         }
                     } else if let Some(e) = err.downcast_ref::<serde_json::error::Error>() {
-                        envoy_log_error!("{e}");
+                        envoy_log_error!("json parsing error: {e}");
                         envoy_filter.send_response(400, Vec::default(), None);
                         return false;
                     } else {
@@ -332,7 +332,7 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
         // TODO: need to test if we get called even if there is no transformation setting
         //       if yes, we need to short circuit here and return Continue
         if !end_of_stream {
-            envoy_log_error!("on_request_body not end_of_stream!");
+            envoy_log_info!("on_request_body not end_of_stream!");
             // TODO: Technically, we don't need to buffer the body yet as we don't support parsing the body now
             //       but it will be coming next. This is mimicking the C++ transformation filter behavior to
             //       always buffer the request body by default unless passthrough is set. Will revisit and consider
@@ -379,7 +379,7 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
         // TODO: need to test if we get called even if there is no transformation setting
         //       if yes, we need to short circuit here and return Continue
         if !end_of_stream {
-            envoy_log_error!("on_response_body not end_of_stream!");
+            envoy_log_info!("on_response_body not end_of_stream!");
             // TODO: Technically, we don't need to buffer the body yet as we don't support parsing the body now
             //       but it will be coming next. This is mimicking the C++ transformation filter behavior to
             //       always buffer the response body by default unless passthrough is set. Will revisit and consider

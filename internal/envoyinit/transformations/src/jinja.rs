@@ -9,15 +9,22 @@ use base64::{
     Engine,
 };
 use minijinja::{Environment, State};
+use once_cell::sync::Lazy;
 use rand::Rng;
 use serde::Deserialize;
 use serde_json::Value as JsonValue;
 use std::collections::BTreeMap;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::env;
+use std::sync::Arc;
 
 const BODY: &str = "body";
 const CONTEXT: &str = "context";
+
+pub static ENV: Lazy<Arc<Environment<'static>>> = Lazy::new(|| Arc::new(new_jinja_env()));
+
+pub static GLOBALS_LOOKUP: Lazy<HashSet<&'static str>> =
+    Lazy::new(|| ENV.globals().map(|(k, _)| k).collect());
 
 // substring can be called with either two or three arguments --
 // the first argument is the string to be modified, the second is the start position
@@ -127,7 +134,8 @@ fn context(state: &State) -> minijinja::Value {
     state.lookup(CONTEXT).unwrap_or_default()
 }
 
-pub fn new_jinja_env() -> Environment<'static> {
+fn new_jinja_env() -> Environment<'static> {
+    eprint!("new_jinja_env");
     let mut env = Environment::new();
 
     env.add_function("env", get_env);
@@ -174,12 +182,20 @@ fn render(
     let tmpl = env
         .template_from_str(template)
         .with_context(|| format!("error creating jinja template {}", template))?;
-    if !parsed_body_as_json && !tmpl.undeclared_variables(false).is_empty() {
-        return Err(TransformationError::UndeclaredJsonVariables(format!(
-            "from template {}",
-            template
-        ))
-        .into());
+    //    if !parsed_body_as_json && !tmpl.undeclared_variables(false).is_empty() {
+    if !parsed_body_as_json {
+        let undeclared_variables = tmpl.undeclared_variables(true);
+        if !undeclared_variables.is_empty() {
+            for v in &undeclared_variables {
+                if !GLOBALS_LOOKUP.contains(v.as_str()) {
+                    return Err(TransformationError::UndeclaredJsonVariables(format!(
+                        "{:?} from template {}",
+                        undeclared_variables, template
+                    ))
+                    .into());
+                }
+            }
+        }
     }
     tmpl.render(ctx)
         .with_context(|| format!("error rendering jinja template {}", template))
