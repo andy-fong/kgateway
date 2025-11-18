@@ -217,23 +217,41 @@ impl Filter {
         self.request_headers_map.as_ref().unwrap_or(&EMPTY_MAP)
     }
 
-    fn transform_request<EHF: EnvoyHttpFilter>(&self, envoy_filter: &mut EHF) {
+    fn transform_request<EHF: EnvoyHttpFilter>(&self, envoy_filter: &mut EHF) -> bool {
         let request_transform = match self.get_per_route_config() {
             Some(config) => &config.transformations.request,
             None => &self.filter_config.transformations.request,
         };
 
         if let Some(transform) = request_transform {
-            let mut ops = EnvoyTransformationOps::new(envoy_filter);
-            if let Err(e) = transformations::jinja::transform_request(
+            match transformations::jinja::transform_request(
                 transform,
                 &self.env,
                 self.get_request_headers_map(),
-                &mut ops,
+                EnvoyTransformationOps::new(envoy_filter),
             ) {
-                envoy_log_warn!("{e}");
+                Ok(()) => {}
+                Err(err) => {
+                    if let Some(e) = err.downcast_ref::<TransformationError>() {
+                        match e {
+                            TransformationError::UndeclaredJsonVariables(msg) => {
+                                envoy_log_error!("{msg}");
+                                envoy_filter.send_response(400, Vec::default(), None);
+                                return false;
+                            }
+                        }
+                    } else if let Some(e) = err.downcast_ref::<serde_json::error::Error>() {
+                        envoy_log_error!("{e}");
+                        envoy_filter.send_response(400, Vec::default(), None);
+                        return false;
+                    } else {
+                        envoy_log_warn!("{err}");
+                    }
+                }
             }
         }
+
+        true
     }
 
     fn transform_response<EHF: EnvoyHttpFilter>(&self, envoy_filter: &mut EHF) -> bool {
@@ -263,6 +281,10 @@ impl Filter {
                                 return false;
                             }
                         }
+                    } else if let Some(e) = err.downcast_ref::<serde_json::error::Error>() {
+                        envoy_log_error!("{e}");
+                        envoy_filter.send_response(400, Vec::default(), None);
+                        return false;
                     } else {
                         envoy_log_warn!("{err}");
                     }
@@ -295,8 +317,10 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
         self.set_per_route_config(envoy_filter);
         // TODO(nfuden): find someone who knows rust to see if we really need this Hash map for serialization
         self.populate_request_headers_map(envoy_filter.get_request_headers());
-        self.transform_request(envoy_filter);
-        abi::envoy_dynamic_module_type_on_http_filter_request_headers_status::Continue
+        if self.transform_request(envoy_filter) {
+            return abi::envoy_dynamic_module_type_on_http_filter_request_headers_status::Continue;
+        }
+        abi::envoy_dynamic_module_type_on_http_filter_request_headers_status::StopIteration
     }
 
     fn on_request_body(
@@ -319,8 +343,10 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
         self.set_per_route_config(envoy_filter);
         // TODO(nfuden): find someone who knows rust to see if we really need this Hash map for serialization
         self.populate_request_headers_map(envoy_filter.get_request_headers());
-        self.transform_request(envoy_filter);
-        abi::envoy_dynamic_module_type_on_http_filter_request_body_status::Continue
+        if self.transform_request(envoy_filter) {
+            return abi::envoy_dynamic_module_type_on_http_filter_request_body_status::Continue;
+        }
+        abi::envoy_dynamic_module_type_on_http_filter_request_body_status::StopIterationAndBuffer
     }
 
     fn on_response_headers(

@@ -208,7 +208,7 @@ pub fn transform_request<T: TransformationOps>(
     transform: &LocalTransform,
     env: &Environment<'static>,
     request_headers_map: &HashMap<String, String>,
-    ops: &mut T,
+    mut ops: T,
 ) -> Result<()> {
     let mut errors = Vec::new();
 
@@ -308,7 +308,7 @@ pub fn transform_request<T: TransformationOps>(
                             abort_processing = true;
                         }
                     }
-                } 
+                }
                 errors.push(err);
                 None
             }
@@ -444,7 +444,7 @@ pub fn transform_response<T: TransformationOps>(
                             abort_processing = true;
                         }
                     }
-                } 
+                }
                 errors.push(err);
                 None
             }

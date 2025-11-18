@@ -552,8 +552,18 @@ func NewTestingSuite(ctx context.Context, testInst *e2e.TestInstallation) suite.
 				resp: &testmatchers.HttpResponse{
 					StatusCode: http.StatusBadRequest, // bad transformation results in 400
 					NotHeaders: []string{
-						"x-how-great",
+						"x-what-method",
 					},
+				},
+			},
+			{
+				name:      "dont pull json info if not json", // shows we parse the body as json
+				routeName: "route-for-body-json",
+				opts: []curl.Option{
+					curl.WithBody("hello"),
+				},
+				resp: &testmatchers.HttpResponse{
+					StatusCode: http.StatusBadRequest, // transformation should choke
 				},
 			},
 		},
@@ -576,18 +586,7 @@ func (s *testingSuite) TestGatewayWithTransformedRoute() {
 		s.dynamicModuleAssertion(false),
 	)
 
-	testCases := []transformationTestCase{
-		{
-			name:      "dont pull json info if not json", // shows we parse the body as json
-			routeName: "route-for-body-json",
-			opts: []curl.Option{
-				curl.WithBody("hello"),
-			},
-			resp: &testmatchers.HttpResponse{
-				StatusCode: http.StatusBadRequest, // transformation should choke
-			},
-		},
-	}
+	testCases := []transformationTestCase{}
 	// testCases = append(testCases, s.commonTestCases...)
 	testCases = append(testCases, s.commonTestCases[len(s.commonTestCases)-1])
 	s.runTestCases((testCases))
