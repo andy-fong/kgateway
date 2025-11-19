@@ -1,3 +1,5 @@
+#![deny(clippy::unwrap_used, clippy::expect_used)]
+
 use envoy_proxy_dynamic_modules_rust_sdk::*;
 use std::any::Any;
 

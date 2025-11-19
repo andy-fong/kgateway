@@ -138,19 +138,19 @@ fn replace_with_random(input: &str, to_replace: &str) -> String {
 }
 
 fn body(state: &State) -> String {
-    eprint!("body() called");
-    state.lookup(BODY).unwrap_or_default().to_string()
+    println!("body() called");
+    state.lookup("body_").unwrap_or_default().to_string()
 }
 
 fn context(state: &State) -> minijinja::Value {
-    eprint!("context() called");
+    println!("context() called");
 //    serde_json::json!(["3", "2", "1"])
 //    vec!["3", "2", "1"]
-    state.lookup(CONTEXT).unwrap_or_default()
+    state.lookup("context_").unwrap_or_default()
 }
 
 fn new_jinja_env() -> Environment<'static> {
-    eprint!("new_jinja_env");
+    println!("new_jinja_env");
     let mut env = Environment::new();
 
     env.add_function("env", get_env);
@@ -202,7 +202,7 @@ fn render(
         let undeclared_variables = tmpl.undeclared_variables(true);
         if !undeclared_variables.is_empty() {
             for v in &undeclared_variables {
-                eprint!("calling GLOBALS_LOOKUP");
+                println!("calling GLOBALS_LOOKUP");
                 if !GLOBALS_LOOKUP.contains(v.as_str()) {
                     return Err(TransformationError::UndeclaredJsonVariables(format!(
                         "{:?} from template {}",
@@ -221,7 +221,7 @@ fn combine_errors(msg: &str, errors: Vec<Error>) -> Result<()> {
     if !errors.is_empty() {
         let combined = errors
             .into_iter()
-            .map(|e| e.to_string())
+            .map(|e| { e.chain().map(|cause| cause.to_string()).collect::<Vec<String>>().join(":")})
             .collect::<Vec<_>>()
             .join("; ");
         return Err(anyhow::anyhow!("{}: {}", msg, combined));
@@ -241,7 +241,7 @@ pub fn transform_request<T: TransformationOps>(
     request_headers_map: &HashMap<String, String>,
     mut ops: T,
 ) -> Result<()> {
-    eprint!("transform_request");
+    println!("transform_request");
     let env = &*ENV;
     let mut errors = Vec::new();
 
@@ -265,10 +265,12 @@ pub fn transform_request<T: TransformationOps>(
 
             if json_body != JsonValue::Null {
                 println!("body_transform: got json body");
+                println!("request check add context() body_transform: {}", body_transform.value);
                 if body_transform.value.contains("context()") {
+                    println!("adding context_");
                     m.insert(
                         CONTEXT.to_string(),
-                        minijinja::Value::from_serialize(&json_body),
+                        minijinja::Value::from_object(&json_body),
                     );
                 }
 
@@ -289,9 +291,11 @@ pub fn transform_request<T: TransformationOps>(
     }
 
     if let Some(body_transform) = transform.body.as_ref() {
+        println!("request check add body() body_transform: {}", body_transform.value);
         if body_transform.value.contains("body()") {
             let body = ops.get_request_body();
-            m.insert(BODY.to_string(), minijinja::Value::from_serialize(&body));
+            println!("adding body_");
+            m.insert("body_".to_string(), minijinja::Value::from_serialize(String::from_utf8_lossy(&body)));
         }
     }
 
@@ -377,7 +381,7 @@ pub fn transform_response<T: TransformationOps>(
     response_headers_map: &HashMap<String, String>,
     mut ops: T,
 ) -> Result<()> {
-    eprint!("transform_response");
+    println!("transform_response");
     let env = &*ENV;
     let mut errors = Vec::new();
 
@@ -400,9 +404,11 @@ pub fn transform_response<T: TransformationOps>(
 
             if json_body != JsonValue::Null {
                 println!("body_transform: got json body");
+                println!("response check add context() body_transform: {}", body_transform.value);
                 if body_transform.value.contains("context()") {
+                    println!("adding context_");
                     m.insert(
-                        CONTEXT.to_string(),
+                        "context_".to_string(),
                         minijinja::Value::from_serialize(&json_body),
                     );
                 }
@@ -423,9 +429,11 @@ pub fn transform_response<T: TransformationOps>(
     }
 
     if let Some(body_transform) = transform.body.as_ref() {
+        println!("response check add body() body_transform: {}", body_transform.value);
         if body_transform.value.contains("body()") {
-            let body = ops.get_request_body();
-            m.insert(BODY.to_string(), minijinja::Value::from_serialize(&body));
+            println!("adding body_");
+            let body = ops.get_response_body();
+            m.insert("body_".to_string(), minijinja::Value::from_serialize(String::from_utf8_lossy(&body)));
         }
     }
 

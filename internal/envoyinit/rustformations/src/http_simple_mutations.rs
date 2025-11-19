@@ -231,17 +231,17 @@ impl Filter {
                     if let Some(e) = err.downcast_ref::<TransformationError>() {
                         match e {
                             TransformationError::UndeclaredJsonVariables(_msg) => {
-                                envoy_log_error!("{err}");
+                                envoy_log_error!("{:#}", err);
                                 envoy_filter.send_response(400, Vec::default(), None);
                                 return false;
                             }
                         }
                     } else if let Some(e) = err.downcast_ref::<serde_json::error::Error>() {
-                        envoy_log_error!("json parsing error: {e}");
+                        envoy_log_error!("json parsing error: {:#}", e);
                         envoy_filter.send_response(400, Vec::default(), None);
                         return false;
                     } else {
-                        envoy_log_warn!("{err}");
+                        envoy_log_warn!("{:#}", err);
                     }
                 }
             }
@@ -271,17 +271,17 @@ impl Filter {
                     if let Some(e) = err.downcast_ref::<TransformationError>() {
                         match e {
                             TransformationError::UndeclaredJsonVariables(_msg) => {
-                                envoy_log_error!("{err}");
+                                envoy_log_error!("{:#}", err);
                                 envoy_filter.send_response(400, Vec::default(), None);
                                 return false;
                             }
                         }
                     } else if let Some(e) = err.downcast_ref::<serde_json::error::Error>() {
-                        envoy_log_error!("json parsing error: {e}");
+                        envoy_log_error!("json parsing error: {:#}", e);
                         envoy_filter.send_response(400, Vec::default(), None);
                         return false;
                     } else {
-                        envoy_log_warn!("{err}");
+                        envoy_log_warn!("{:#}", err);
                     }
                 }
             }
