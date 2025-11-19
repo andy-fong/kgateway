@@ -5,7 +5,7 @@ use crate::TransformationError;
 use crate::TransformationOps;
 use anyhow::{Context, Error, Result};
 use base64::{
-    engine::general_purpose::{STANDARD, STANDARD_NO_PAD},
+    engine::general_purpose::{STANDARD, STANDARD_NO_PAD, URL_SAFE},
     Engine,
 };
 use minijinja::{Environment, State};
@@ -16,14 +16,13 @@ use serde_json::Value as JsonValue;
 use std::collections::BTreeMap;
 use std::collections::{HashMap, HashSet};
 use std::env;
-use std::sync::Arc;
 
 const BODY: &str = "body";
 const CONTEXT: &str = "context";
 
-pub static ENV: Lazy<Arc<Environment<'static>>> = Lazy::new(|| Arc::new(new_jinja_env()));
+static ENV: Lazy<Environment<'static>> = Lazy::new(new_jinja_env);
 
-pub static GLOBALS_LOOKUP: Lazy<HashSet<&'static str>> =
+static GLOBALS_LOOKUP: Lazy<HashSet<&'static str>> =
     Lazy::new(|| ENV.globals().map(|(k, _)| k).collect());
 
 // substring can be called with either two or three arguments --
@@ -107,6 +106,18 @@ fn base64_decode(input: &str) -> String {
         .unwrap_or_default()
 }
 
+fn base64url_encode(input: &[u8]) -> String {
+    URL_SAFE.encode(input)
+}
+
+fn base64url_decode(input: &str) -> String {
+    URL_SAFE
+        .decode(input)
+        .ok()
+        .and_then(|bytes| String::from_utf8(bytes).ok())
+        .unwrap_or_default()
+}
+
 fn get_env(env_var: &str) -> String {
     env::var(env_var).unwrap_or_default()
 }
@@ -126,11 +137,15 @@ fn replace_with_random(input: &str, to_replace: &str) -> String {
     input.replace(to_replace, &pattern)
 }
 
-fn body(state: &State) -> minijinja::Value {
-    state.lookup(BODY).unwrap_or_default()
+fn body(state: &State) -> String {
+    eprint!("body() called");
+    state.lookup(BODY).unwrap_or_default().to_string()
 }
 
 fn context(state: &State) -> minijinja::Value {
+    eprint!("context() called");
+//    serde_json::json!(["3", "2", "1"])
+//    vec!["3", "2", "1"]
     state.lookup(CONTEXT).unwrap_or_default()
 }
 
@@ -144,9 +159,9 @@ fn new_jinja_env() -> Environment<'static> {
     // !! Standard string manipulation
     // env.add_function("trim", trim);
     env.add_function("base64_encode", base64_encode);
-    // env.add_function("base64url_encode", base64url_encode);
+    env.add_function("base64url_encode", base64url_encode);
     env.add_function("base64_decode", base64_decode);
-    // env.add_function("base64url_decode", base64url_decode);
+    env.add_function("base64url_decode", base64url_decode);
     env.add_function("replace_with_random", replace_with_random);
     env.add_function("raw_string", raw_string);
     //        env.add_function("word_count", word_count);
@@ -166,7 +181,7 @@ fn new_jinja_env() -> Environment<'static> {
     // env.add_function("cluster_metadata", cluster_metadata);
 
     // !! Possibly not relevant old inja internal debug stuff
-    env.add_function("context", context);
+    env.add_function(CONTEXT, context);
 
     // specific.extend(self.route_specific.into_iter());
 
@@ -187,6 +202,7 @@ fn render(
         let undeclared_variables = tmpl.undeclared_variables(true);
         if !undeclared_variables.is_empty() {
             for v in &undeclared_variables {
+                eprint!("calling GLOBALS_LOOKUP");
                 if !GLOBALS_LOOKUP.contains(v.as_str()) {
                     return Err(TransformationError::UndeclaredJsonVariables(format!(
                         "{:?} from template {}",
@@ -222,10 +238,11 @@ fn combine_errors(msg: &str, errors: Vec<Error>) -> Result<()> {
 /// 400 response back
 pub fn transform_request<T: TransformationOps>(
     transform: &LocalTransform,
-    env: &Environment<'static>,
     request_headers_map: &HashMap<String, String>,
     mut ops: T,
 ) -> Result<()> {
+    eprint!("transform_request");
+    let env = &*ENV;
     let mut errors = Vec::new();
 
     //    let mut m = BTreeMap::new();
@@ -356,11 +373,12 @@ pub fn transform_request<T: TransformationOps>(
 /// All the errors are collected and bubble up the chain so they can be logged
 pub fn transform_response<T: TransformationOps>(
     transform: &LocalTransform,
-    env: &Environment<'static>,
     request_headers_map: &HashMap<String, String>,
     response_headers_map: &HashMap<String, String>,
     mut ops: T,
 ) -> Result<()> {
+    eprint!("transform_response");
+    let env = &*ENV;
     let mut errors = Vec::new();
 
     let mut m = BTreeMap::new();

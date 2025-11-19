@@ -4,7 +4,6 @@ use once_cell::sync::Lazy;
 use serde::Deserialize;
 use serde_json::Value as JsonValue;
 use std::collections::HashMap;
-use std::sync::Arc;
 use transformations::{LocalTransformationConfig, TransformationError, TransformationOps};
 
 #[cfg(test)]
@@ -149,7 +148,6 @@ impl<EHF: EnvoyHttpFilter> HttpFilterConfig<EHF> for FilterConfig {
         Box::new(Filter {
             filter_config: self.clone(),
             per_route_config: None,
-            env: transformations::jinja::ENV.clone(),
             request_headers_map: None,
         })
     }
@@ -158,7 +156,6 @@ impl<EHF: EnvoyHttpFilter> HttpFilterConfig<EHF> for FilterConfig {
 pub struct Filter {
     filter_config: FilterConfig,
     per_route_config: Option<Box<PerRouteConfig>>,
-    env: Arc<minijinja::Environment<'static>>,
     request_headers_map: Option<HashMap<String, String>>,
 }
 
@@ -226,7 +223,6 @@ impl Filter {
         if let Some(transform) = request_transform {
             match transformations::jinja::transform_request(
                 transform,
-                &self.env,
                 self.get_request_headers_map(),
                 EnvoyTransformationOps::new(envoy_filter),
             ) {
@@ -266,7 +262,6 @@ impl Filter {
 
             match transformations::jinja::transform_response(
                 transform,
-                &self.env,
                 self.get_request_headers_map(),
                 &response_headers_map,
                 EnvoyTransformationOps::new(envoy_filter),
