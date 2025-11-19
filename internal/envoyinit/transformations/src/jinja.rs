@@ -17,8 +17,12 @@ use std::collections::BTreeMap;
 use std::collections::{HashMap, HashSet};
 use std::env;
 
-const BODY: &str = "body";
-const CONTEXT: &str = "context";
+// These keys are used in a shared scope in the State where we will also put the parsed json body in.
+// So, they needs to be as uniq as possible to minimize collision.
+const STATE_LOOKUP_KEY_BODY: &str = "body.io.solo";
+const STATE_LOOKUP_KEY_CONTEXT: &str = "context.io.solo";
+const STATE_LOOKUP_KEY_HEADERS: &str = "headers.io.solo";
+const STATE_LOOKUP_KEY_REQ_HEADERS: &str = "request_headers.io.solo";
 
 static ENV: Lazy<Environment<'static>> = Lazy::new(new_jinja_env);
 
@@ -47,7 +51,7 @@ fn substring(input: &str, start: usize, len: Option<usize>) -> String {
 }
 
 fn header(state: &State, key: &str) -> String {
-    let headers = state.lookup("headers");
+    let headers = state.lookup(STATE_LOOKUP_KEY_HEADERS);
     let Some(headers) = headers else {
         return String::default();
     };
@@ -60,7 +64,7 @@ fn header(state: &State, key: &str) -> String {
 }
 
 fn request_header(state: &State, key: &str) -> String {
-    let headers = state.lookup("request_headers");
+    let headers = state.lookup(STATE_LOOKUP_KEY_REQ_HEADERS);
     let Some(headers) = headers else {
         return String::default();
     };
@@ -139,14 +143,15 @@ fn replace_with_random(input: &str, to_replace: &str) -> String {
 
 fn body(state: &State) -> String {
     println!("body() called");
-    state.lookup("body_").unwrap_or_default().to_string()
+    state
+        .lookup(STATE_LOOKUP_KEY_BODY)
+        .unwrap_or_default()
+        .to_string()
 }
 
 fn context(state: &State) -> minijinja::Value {
     println!("context() called");
-//    serde_json::json!(["3", "2", "1"])
-//    vec!["3", "2", "1"]
-    state.lookup("context_").unwrap_or_default()
+    state.lookup(STATE_LOOKUP_KEY_CONTEXT).unwrap_or_default()
 }
 
 fn new_jinja_env() -> Environment<'static> {
@@ -170,7 +175,7 @@ fn new_jinja_env() -> Environment<'static> {
     env.add_function("header", header);
     env.add_function("request_header", request_header);
     // env.add_function("extraction", extraction);
-    env.add_function(BODY, body);
+    env.add_function("body", body);
     // env.add_function("dynamic_metadata", dynamic_metadata);
 
     // !! Datasource Puller needed
@@ -181,9 +186,7 @@ fn new_jinja_env() -> Environment<'static> {
     // env.add_function("cluster_metadata", cluster_metadata);
 
     // !! Possibly not relevant old inja internal debug stuff
-    env.add_function(CONTEXT, context);
-
-    // specific.extend(self.route_specific.into_iter());
+    env.add_function("context".to_string(), context);
 
     env
 }
@@ -218,10 +221,17 @@ fn render(
 }
 
 fn combine_errors(msg: &str, errors: Vec<Error>) -> Result<()> {
+    // Each error can have multiple level of errors, that's why there is
+    // the e.chain() iterating through each error and combine them
     if !errors.is_empty() {
         let combined = errors
             .into_iter()
-            .map(|e| { e.chain().map(|cause| cause.to_string()).collect::<Vec<String>>().join(":")})
+            .map(|e| {
+                e.chain()
+                    .map(|cause| cause.to_string())
+                    .collect::<Vec<String>>()
+                    .join(":")
+            })
             .collect::<Vec<_>>()
             .join("; ");
         return Err(anyhow::anyhow!("{}: {}", msg, combined));
@@ -250,11 +260,11 @@ pub fn transform_request<T: TransformationOps>(
     // for request rendering, both the header() and request_header() use the request_headers
     // so, setting both to the request_headers_map in the context
     m.insert(
-        "headers".to_string(),
+        STATE_LOOKUP_KEY_HEADERS.to_string(),
         minijinja::Value::from_serialize(request_headers_map),
     );
     m.insert(
-        "request_headers".to_string(),
+        STATE_LOOKUP_KEY_REQ_HEADERS.to_string(),
         minijinja::Value::from_serialize(request_headers_map),
     );
     let mut parsed_body_as_json = false;
@@ -265,12 +275,15 @@ pub fn transform_request<T: TransformationOps>(
 
             if json_body != JsonValue::Null {
                 println!("body_transform: got json body");
-                println!("request check add context() body_transform: {}", body_transform.value);
+                println!(
+                    "request check add context() body_transform: {}",
+                    body_transform.value
+                );
                 if body_transform.value.contains("context()") {
                     println!("adding context_");
                     m.insert(
-                        CONTEXT.to_string(),
-                        minijinja::Value::from_object(&json_body),
+                        STATE_LOOKUP_KEY_CONTEXT.to_string(),
+                        minijinja::Value::from_serialize(&json_body),
                     );
                 }
 
@@ -291,11 +304,17 @@ pub fn transform_request<T: TransformationOps>(
     }
 
     if let Some(body_transform) = transform.body.as_ref() {
-        println!("request check add body() body_transform: {}", body_transform.value);
+        println!(
+            "request check add body() body_transform: {}",
+            body_transform.value
+        );
         if body_transform.value.contains("body()") {
             let body = ops.get_request_body();
             println!("adding body_");
-            m.insert("body_".to_string(), minijinja::Value::from_serialize(String::from_utf8_lossy(&body)));
+            m.insert(
+                STATE_LOOKUP_KEY_BODY.to_string(),
+                minijinja::Value::from_serialize(String::from_utf8_lossy(&body)),
+            );
         }
     }
 
@@ -375,6 +394,8 @@ pub fn transform_request<T: TransformationOps>(
 ///
 /// On any rendering errors, we will remove the header and continue
 /// All the errors are collected and bubble up the chain so they can be logged
+/// On body parsing as json error, we return error immediately so we can send a
+/// 400 response back
 pub fn transform_response<T: TransformationOps>(
     transform: &LocalTransform,
     request_headers_map: &HashMap<String, String>,
@@ -389,11 +410,11 @@ pub fn transform_response<T: TransformationOps>(
     // for response rendering, header() uses response_headers and request_header()
     // uses the request_headers. So, setting them in the context accordingly
     m.insert(
-        "headers".to_string(),
+        STATE_LOOKUP_KEY_HEADERS.to_string(),
         minijinja::Value::from_serialize(response_headers_map),
     );
     m.insert(
-        "request_headers".to_string(),
+        STATE_LOOKUP_KEY_REQ_HEADERS.to_string(),
         minijinja::Value::from_serialize(request_headers_map),
     );
     let mut parsed_body_as_json = false;
@@ -404,11 +425,14 @@ pub fn transform_response<T: TransformationOps>(
 
             if json_body != JsonValue::Null {
                 println!("body_transform: got json body");
-                println!("response check add context() body_transform: {}", body_transform.value);
+                println!(
+                    "response check add context() body_transform: {}",
+                    body_transform.value
+                );
                 if body_transform.value.contains("context()") {
                     println!("adding context_");
                     m.insert(
-                        "context_".to_string(),
+                        STATE_LOOKUP_KEY_CONTEXT.to_string(),
                         minijinja::Value::from_serialize(&json_body),
                     );
                 }
@@ -429,11 +453,17 @@ pub fn transform_response<T: TransformationOps>(
     }
 
     if let Some(body_transform) = transform.body.as_ref() {
-        println!("response check add body() body_transform: {}", body_transform.value);
+        println!(
+            "response check add body() body_transform: {}",
+            body_transform.value
+        );
         if body_transform.value.contains("body()") {
             println!("adding body_");
             let body = ops.get_response_body();
-            m.insert("body_".to_string(), minijinja::Value::from_serialize(String::from_utf8_lossy(&body)));
+            m.insert(
+                STATE_LOOKUP_KEY_BODY.to_string(),
+                minijinja::Value::from_serialize(String::from_utf8_lossy(&body)),
+            );
         }
     }
 
