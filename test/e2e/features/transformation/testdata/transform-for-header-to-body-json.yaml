@@ -31,7 +31,7 @@ spec:
     response:
       body:
         parseAs: "AsString"
-        # Because the test reply on the json body from http bin to re-construct the request, we cannot 
-        # just replace the body. Here, we are just testing body() is the string representation of the body
-        # and it does not affect the test when we validate the request body we changed above
-        value: '{{body()}}'
+        # Because the test relies on the json body from http-bin to re-construct the request, we cannot 
+        # just replace the body. Here, we are replacing a known request header value put in the body by
+        # http-bin and then check for the request header is changed
+        value: '{{ replace_with_random(body(), "andy") }}'

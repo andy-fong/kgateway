@@ -48,6 +48,7 @@ var (
 	gatewayManifest                      = filepath.Join(fsutils.MustGetThisDir(), "testdata", "gateway.yaml")
 	transformForCustomFunctionsManifest  = filepath.Join(fsutils.MustGetThisDir(), "testdata", "transform-for-custom-functions.yaml")
 	transformForHeadersManifest          = filepath.Join(fsutils.MustGetThisDir(), "testdata", "transform-for-headers.yaml")
+	transformForPseudoHeadersManifest    = filepath.Join(fsutils.MustGetThisDir(), "testdata", "transform-for-pseudo-headers.yaml")
 	transformForBodyJsonManifest         = filepath.Join(fsutils.MustGetThisDir(), "testdata", "transform-for-body-json.yaml")
 	rustformationForBodyJsonManifest     = filepath.Join(fsutils.MustGetThisDir(), "testdata", "transform-for-body-json-rust.yaml")
 	transformForBodyAsStringManifest     = filepath.Join(fsutils.MustGetThisDir(), "testdata", "transform-for-body-as-string.yaml")
@@ -71,6 +72,7 @@ var (
 			gatewayManifest,
 			transformForCustomFunctionsManifest,
 			transformForHeadersManifest,
+			transformForPseudoHeadersManifest,
 			transformForBodyAsStringManifest,
 			gatewayAttachedTransformManifest,
 			transformForMatchHeaderManifest,
@@ -597,14 +599,50 @@ func selectCommonTestCases(indices ...int) []transformationTestCase {
 			routeName: "route-for-header-to-body-json",
 			opts: []curl.Option{
 				curl.WithBody(`[3,2,1]`),
-				curl.WithHeader("X-Incoming-Stuff", "super"),
+				curl.WithHeader("X-my-name", "andy"),
 			},
 			resp: &testmatchers.HttpResponse{
 				StatusCode: http.StatusOK,
 				Headers:    map[string]any{},
 			},
 			req: &testmatchers.HttpRequest{
+				Headers: map[string]any{
+					// The original value is "andy" but we use body modification to change the http-bin
+					// response to a random string which is longer than 5 characters. It will fail if
+					// the modification did not happen because "andy" is only 4 characters
+					"x-my-name": gomega.MatchRegexp(`.....+`),
+				},
 				Body: fmt.Sprintf("321-%s", httpbin_echo_base_path),
+			},
+		},
+		{
+			// test 15
+			name:      "modify :method and :status header foo=bar",
+			routeName: "pseudo-headers",
+			opts: []curl.Option{
+				curl.WithHeader("foo", "bar"),
+			},
+			resp: &testmatchers.HttpResponse{
+				StatusCode: http.StatusCreated,
+				Headers:    map[string]any{},
+			},
+			req: &testmatchers.HttpRequest{
+				Method: "POST",
+			},
+		},
+		{
+			// test 16
+			name:      "modify :method and :status header foo=baz",
+			routeName: "pseudo-headers",
+			opts: []curl.Option{
+				curl.WithHeader("foo", "baz"),
+			},
+			resp: &testmatchers.HttpResponse{
+				StatusCode: http.StatusAccepted,
+				Headers:    map[string]any{},
+			},
+			req: &testmatchers.HttpRequest{
+				Method: "POST",
 			},
 		},
 	}
@@ -634,8 +672,10 @@ func selectCommonTestCases(indices ...int) []transformationTestCase {
 func NewTestingSuite(ctx context.Context, testInst *e2e.TestInstallation) suite.TestingSuite {
 	return &testingSuite{
 		base.NewBaseTestingSuite(ctx, testInst, setup, testCases),
-		// enter a list of indices to select specific tests or -1 for the last test for
-		// local develepment. Default will return all common test cases.
+		// For local development only!
+		// Enter a list of indices to select specific tests, -1 means the last test.
+		// Default will return all common test cases.
+		// reviewers: please flag the PR if the argument is not empty!
 		selectCommonTestCases(),
 	}
 }
@@ -819,16 +859,32 @@ func (s *testingSuite) assertRouteAndTrafficPolicyStatus(routesToCheck, trafficP
 
 func (s *testingSuite) assertSuiteResourceStatus() {
 	routesToCheck := []string{
-		"example-route-for-headers",
-		//		"example-route-for-body-json",
 		"example-route-for-body-as-string",
+		// This route is apply right before that test as this is test specific. Cannot check at suite.
+		//		"example-route-for-body-json",
+		"example-route-for-custom-functions",
 		"example-route-for-gateway-attached-transform",
+		"example-route-for-header-match",
+		"example-route-for-header-to-body-json",
+		"example-route-for-headers",
+		"example-route-for-method-match",
+		"example-route-for-path-match",
+		"example-route-for-pseudo-headers",
+		"example-route-for-query-match",
 	}
 	trafficPoliciesToCheck := []string{
-		"example-traffic-policy-for-headers",
-		//		"example-traffic-policy-for-body-json",
 		"example-traffic-policy-for-body-as-string",
+		// This policy is applied right before that test as this is test specific. Cannot check at suite.
+		//		"example-traffic-policy-for-body-json",
+		"example-traffic-policy-for-custom-functions",
 		"example-traffic-policy-for-gateway-attached-transform",
+		"example-traffic-policy-for-header-match",
+		"example-traffic-policy-for-header-to-body-json",
+		"example-traffic-policy-for-headers",
+		"example-traffic-policy-for-method-match",
+		"example-traffic-policy-for-path-match",
+		"example-traffic-policy-for-pseudo-headers",
+		"example-traffic-policy-for-query-match",
 	}
 	s.assertRouteAndTrafficPolicyStatus(routesToCheck, trafficPoliciesToCheck)
 }
