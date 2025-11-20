@@ -127,467 +127,516 @@ type testingSuite struct {
 	commonTestCases []transformationTestCase
 }
 
-func NewTestingSuite(ctx context.Context, testInst *e2e.TestInstallation) suite.TestingSuite {
-	return &testingSuite{
-		base.NewBaseTestingSuite(ctx, testInst, setup, testCases),
-		[]transformationTestCase{
-			{
-				name:      "basic-gateway-attached",
-				routeName: "gateway-attached-transform",
-				opts: []curl.Option{
-					// in testdata/gateway-attached-transform.yaml,
-					//    for x-empty, the value is set to ""
-					//    for x-not-set, the value is not set
-					// The behavior for both is removing the existing header
-					// Testing this to make sure rustformation behaves the same
-					curl.WithHeader("x-empty", "not empty"),
-					curl.WithHeader("x-not-set", "set"),
+// select specific test cases to run. Mainly for speeding up local testing
+// when working on a specific test case. By default, when indices is empty,
+// it returns all test cases. -1 index select the last one.
+func selectCommonTestCases(indices ...int) []transformationTestCase {
+	commonTestCases := []transformationTestCase{
+		{
+			// test 0
+			name:      "basic-gateway-attached",
+			routeName: "gateway-attached-transform",
+			opts: []curl.Option{
+				// in testdata/gateway-attached-transform.yaml,
+				//    for x-empty, the value is set to ""
+				//    for x-not-set, the value is not set
+				// The behavior for both is removing the existing header
+				// Testing this to make sure rustformation behaves the same
+				curl.WithHeader("x-empty", "not empty"),
+				curl.WithHeader("x-not-set", "set"),
+			},
+			resp: &testmatchers.HttpResponse{
+				StatusCode: http.StatusOK,
+				Headers: map[string]any{
+					"response-gateway": "goodbye",
 				},
-				resp: &testmatchers.HttpResponse{
-					StatusCode: http.StatusOK,
-					Headers: map[string]any{
-						"response-gateway": "goodbye",
-					},
-					NotHeaders: []string{
-						"x-foo-response",
-					},
-				},
-				req: &testmatchers.HttpRequest{
-					Headers: map[string]any{
-						"request-gateway": "hello",
-					},
-					NotHeaders: []string{
-						"x-not-set",
-						"x-empty",
-					},
+				NotHeaders: []string{
+					"x-foo-response",
 				},
 			},
-			{
-				name:      "basic",
-				routeName: "headers",
-				opts: []curl.Option{
-					curl.WithBody("hello"),
+			req: &testmatchers.HttpRequest{
+				Headers: map[string]any{
+					"request-gateway": "hello",
 				},
-				resp: &testmatchers.HttpResponse{
-					StatusCode: http.StatusOK,
-					Headers: map[string]any{
-						"x-foo-response":        "notsuper",
-						"x-foo-response-status": "200",
-						// These are commented out so the testcase will pass on both classic and rustformation
-						// and left here for documentation purpose
-						// There should be a space at the beginning and end but
-						// rust minijinja template rendering seems to right trim the space at the end
-						// "x-space-test": " foobar",
-						// while C++ inja leave the space untouched.
-						// "x-space-test": " foobar ",
-					},
-					NotHeaders: []string{
-						"response-gateway",
-					},
-				},
-				req: &testmatchers.HttpRequest{
-					Headers: map[string]any{
-						"x-foo-bar":  "foolen_5",
-						"x-foo-bar2": "foolen_5",
-						// There should be a space at the beginning and end but
-						// there might be a side effect from the echo server where the header values are trimmed
-						"x-space-test": "foobar",
-					},
-					NotHeaders: []string{
-						// looks like the way we set up transformation targeting gateway, we are
-						// also using RouteTransformation instead of FilterTransformation and it's
-						// set , so it's set at the route table level and if there is a more specific
-						// transformation (eg in vhost or prefix match), the gateway attached transformation
-						// will not apply. Make sure it's not there.
-						"request-gateway",
-					},
-				},
-			},
-			{
-				name:      "remove headers",
-				routeName: "headers",
-				opts: []curl.Option{
-					curl.WithBody("hello"),
-					curl.WithHeader("x-remove-me", "test"),
-					curl.WithHeader("x-dont-remove-me", "in request"),
-				},
-				resp: &testmatchers.HttpResponse{
-					StatusCode: http.StatusOK,
-					// go-httpbin doesn't allow setting custom response header, so make sure
-					// we get one of the default access-control header and removed the other
-					Headers: map[string]any{
-						"access-control-allow-credentials": "true",
-					},
-					NotHeaders: []string{
-						"access-control-allow-origin",
-					},
-				},
-				req: &testmatchers.HttpRequest{
-					Headers: map[string]any{
-						"x-dont-remove-me": "in request",
-					},
-					NotHeaders: []string{
-						"x-remove-me",
-					},
-				},
-			},
-			{
-				name:      "set headers with headers already exists multiple times",
-				routeName: "headers",
-				opts: []curl.Option{
-					curl.WithBody("hello"),
-					// The 2 x-foo-bar headers will be replaced with a single one when we set the header
-					// to a value using transformation
-					curl.WithMultiHeader("x-foo-bar", []string{"original_1", "original_2"}),
-				},
-				resp: &testmatchers.HttpResponse{
-					StatusCode: http.StatusOK,
-					Headers: map[string]any{
-						"x-foo-response":        "notsuper",
-						"x-foo-response-status": "200",
-					},
-					NotHeaders: []string{
-						"response-gateway",
-					},
-				},
-				req: &testmatchers.HttpRequest{
-					Headers: map[string]any{
-						"x-foo-bar":  "foolen_5",
-						"x-foo-bar2": "foolen_5",
-					},
-					NotHeaders: []string{
-						// looks like the way we set up transformation targeting gateway, we are
-						// also using RouteTransformation instead of FilterTransformation and it's
-						// set , so it's set at the route table level and if there is a more specific
-						// transformation (eg in vhost or prefix match), the gateway attached transformation
-						// will not apply. Make sure it's not there.
-						"request-gateway",
-					},
-					Body: "hello",
-				},
-			},
-			{
-				name:      "conditional set by request header", // inja and the request_header function in use
-				routeName: "headers",
-				opts: []curl.Option{
-					curl.WithBody("hello-world"),
-					curl.WithHeader("x-add-bar", "super"),
-				},
-				resp: &testmatchers.HttpResponse{
-					StatusCode: http.StatusOK,
-					Headers: map[string]any{
-						"x-foo-response":        "supersupersuper",
-						"x-foo-response-status": "200",
-					},
-				},
-				req: &testmatchers.HttpRequest{
-					Headers: map[string]any{
-						"x-foo-bar":  "foolen_11",
-						"x-foo-bar2": "foolen_11",
-					},
-					NotHeaders: []string{
-						// looks like the way we set up transformation targeting gateway, we are
-						// also using RouteTransformation instead of FilterTransformation and it's
-						// set , so it's set at the route table level and if there is a more specific
-						// transformation (eg in vhost or prefix match), the gateway attached transformation
-						// will not apply. Make sure it's not there.
-						"request-gateway",
-					},
-				},
-			},
-			{
-				// When all matching criterion are met, path match takes precedence
-				name:      "match-all",
-				routeName: "match",
-				opts: []curl.Option{
-					curl.WithHeader("foo", "bar"),
-					curl.WithQueryParameters(map[string]string{"test": "123"}),
-				},
-				url: "/path_match/index.html",
-				resp: &testmatchers.HttpResponse{
-					StatusCode: http.StatusOK,
-					Headers: map[string]any{
-						"x-foo-response":  "path matched",
-						"x-path-response": "matched",
-					},
-					NotHeaders: []string{
-						"response-gateway",
-						"x-method-response",
-						"x-header-response",
-						"x-query-response",
-					},
-				},
-				req: &testmatchers.HttpRequest{
-					Headers: map[string]any{
-						"x-foo-request":  "path matched",
-						"x-path-request": "matched",
-					},
-					NotHeaders: []string{
-						"request-gateway",
-						"x-method-request",
-						"x-header-request",
-						"x-query-request",
-					},
-				},
-			},
-			{
-				// When all matching criterion are met except path, method match takes precedence
-				name:      "match-method-header-and-query",
-				routeName: "match",
-				opts: []curl.Option{
-					curl.WithHeader("foo", "bar"),
-					curl.WithQueryParameters(map[string]string{"test": "123"}),
-				},
-				resp: &testmatchers.HttpResponse{
-					StatusCode: http.StatusOK,
-					Headers: map[string]any{
-						"x-foo-response":    "method matched",
-						"x-method-response": "matched",
-					},
-					NotHeaders: []string{
-						"response-gateway",
-						"x-path-response",
-						"x-header-response",
-						"x-query-response",
-					},
-				},
-				req: &testmatchers.HttpRequest{
-					Headers: map[string]any{
-						"x-foo-request":    "method matched",
-						"x-method-request": "matched",
-					},
-					NotHeaders: []string{
-						"request-gateway",
-						"x-path-request",
-						"x-header-request",
-						"x-query-request",
-					},
-				},
-			},
-			{
-				// When all matching criterion are met except path and method, header match takes precedence
-				name:      "match-header-and-query",
-				routeName: "match",
-				opts: []curl.Option{
-					curl.WithBody("hello"),
-					curl.WithHeader("foo", "bar"),
-					curl.WithQueryParameters(map[string]string{"test": "123"}),
-				},
-				resp: &testmatchers.HttpResponse{
-					StatusCode: http.StatusOK,
-					Headers: map[string]any{
-						"x-foo-response":    "header matched",
-						"x-header-response": "matched",
-					},
-					NotHeaders: []string{
-						"response-gateway",
-						"x-path-response",
-						"x-method-response",
-						"x-query-response",
-					},
-				},
-				req: &testmatchers.HttpRequest{
-					Headers: map[string]any{
-						"x-foo-request":    "header matched",
-						"x-header-request": "matched",
-					},
-					NotHeaders: []string{
-						"request-gateway",
-						"x-path-request",
-						"x-method-request",
-						"x-query-request",
-					},
-				},
-			},
-			{
-				name:      "match-query",
-				routeName: "match",
-				opts: []curl.Option{
-					curl.WithBody("hello"),
-					curl.WithQueryParameters(map[string]string{"test": "123"}),
-				},
-				resp: &testmatchers.HttpResponse{
-					StatusCode: http.StatusOK,
-					Headers: map[string]any{
-						"x-foo-response":   "query matched",
-						"x-query-response": "matched",
-					},
-					NotHeaders: []string{
-						"response-gateway",
-						"x-path-response",
-						"x-method-response",
-						"x-header-response",
-					},
-				},
-				req: &testmatchers.HttpRequest{
-					Headers: map[string]any{
-						"x-foo-request":   "query matched",
-						"x-query-request": "matched",
-					},
-					NotHeaders: []string{
-						"request-gateway",
-						"x-path-request",
-						"x-method-request",
-						"x-header-request",
-					},
-				},
-			},
-			{
-				// Interesting Note: because when a transformation attached to the gateway is set at route-table
-				// level, when nothing match and envoy returns 404, that transformation won't ge applied neither!
-				name:      "match-none",
-				routeName: "match",
-				opts: []curl.Option{
-					curl.WithBody("hello"),
-				},
-				resp: &testmatchers.HttpResponse{
-					StatusCode: http.StatusNotFound,
-					Headers:    map[string]any{
-						// The Gateway attached transformation never apply when no route match
-						//						"response-gateway": "goodbyte",
-					},
-					NotHeaders: []string{
-						"response-gateway",
-						"x-path-response",
-						"x-method-response",
-						"x-header-response",
-						"x-query-response",
-						"x-foo-response",
-					},
-				},
-				req: &testmatchers.HttpRequest{
-					Headers: map[string]any{
-						// The Gateway attached transformation never apply when no route match
-						//						"request-gateway": "hello",
-					},
-					NotHeaders: []string{
-						"request-gateway",
-						"x-path-request",
-						"x-method-request",
-						"x-header-request",
-						"x-foo-request",
-						"x-query-request",
-					},
-				},
-			},
-			{
-				name:      "custom functions",
-				routeName: "custom-functions",
-				opts: []curl.Option{
-					curl.WithBody(`{"foo":"\"bar\""}`),
-				},
-				resp: &testmatchers.HttpResponse{
-					StatusCode: http.StatusOK,
-					Headers: map[string]any{
-						"x-base64-encode":                   "YmFzZTY0IGVuY29kZSBpbiByZXNwb25zZSBoZWFkZXI=",
-						"x-base64-decode":                   "base64 decode in response header",
-						"x-base64-decode-invalid-non-empty": "foobar",
-						"x-substring":                       "response",
-						"x-substring2":                      "resp",
-						// when the len is invalid, we default to the end of the string
-						"x-substring-invalid2": "response",
-						"x-env":                gomega.MatchRegexp(`default/gw-[a-f0-9]*-[a-z0-9]*`),
-						"x-replace-random":     gomega.MatchRegexp(`.+ be or not .+ be`),
-					},
-					NotHeaders: []string{
-						// When decode fail, we return an empty string which in turn becomes a "remove" header ops
-						"x-base64-decode-invalid",
-						// when start is invalid, we return an empty string which in turn becomes a "remove" header ops
-						"x-substring-invalid",
-						"x-env-not-set",
-					},
-				},
-				req: &testmatchers.HttpRequest{
-					Headers: map[string]any{
-						"x-base64-encode":                   "YmFzZTY0IGVuY29kZSBpbiByZXF1ZXN0IGhlYWRlcg==",
-						"x-base64-decode":                   "base64 decode in request header",
-						"x-base64-decode-invalid-non-empty": "foobar",
-						"x-substring":                       "request",
-						"x-substring2":                      "req",
-						// when the len is invalid, we default to the end of the string
-						"x-substring-invalid2": "request",
-						"x-env":                gomega.MatchRegexp(`default/gw-[a-f0-9]*-[a-z0-9]*`),
-						"x-replace-random":     gomega.MatchRegexp(`.+ be or not .+ be`),
-						"content-length":       "31",
-					},
-					NotHeaders: []string{
-						// When decode fail, we return an empty string which in turn becomes a "remove" header ops
-						"x-base64-decode-invalid",
-						// when start is invalid, we return an empty string which in turn becomes a "remove" header ops
-						"x-substring-invalid",
-						"x-env-not-set",
-					},
-					Body: testmatchers.JSONContains([]byte(`{"Foo":"\"bar\""}`)),
-				},
-			},
-			{
-				name:      "pull json info", // shows we parse the body as json
-				routeName: "route-for-body-json",
-				opts: []curl.Option{
-					curl.WithBody(`{"mykey": {"myinnerkey": "myinnervalue"}}`),
-					curl.WithHeader("X-Incoming-Stuff", "super"),
-				},
-				resp: &testmatchers.HttpResponse{
-					StatusCode: http.StatusOK,
-					Headers: map[string]any{
-						"x-how-great":   "level_super",
-						"from-incoming": "key_level_myinnervalue",
-					},
-					// The test dump the headers field from the echo response into the top level of
-					// the body, so all the request headers would be at the top level of the json body
-					Body: testmatchers.JSONContains([]byte(`{"X-Incoming-Stuff":["super"],"X-Transformed-Incoming":["level_myinnervalue"]}`)),
-				},
-				// Note: for this test, there is a response body transformation setup which extracts just the headers field
-				// When we create the Request Object from the echo response, we accounted for that
-				req: &testmatchers.HttpRequest{
-					Headers: map[string]any{
-						"X-Transformed-Incoming": "level_myinnervalue",
-					},
-				},
-			},
-			{
-				// The default for Body parsing is AsString which translate to body passthrough (no buffering in envoy)
-				// For this test, the response header transformation is set to try to use the `headers` field in the response
-				// json body, because the body is never parse, so `headers` is undefine and envoy returns 400 response
-				name:      "dont pull info if we dont parse json",
-				routeName: "route-for-body",
-				opts: []curl.Option{
-					curl.WithBody(`{"mykey": {"myinnerkey": "myinnervalue"}}`),
-					curl.WithHeader("X-Incoming-Stuff", "super"),
-				},
-				resp: &testmatchers.HttpResponse{
-					StatusCode: http.StatusBadRequest, // bad transformation results in 400
-					NotHeaders: []string{
-						"x-what-method",
-					},
-				},
-			},
-			{
-				name:      "dont pull json info if not json", // shows we parse the body as json
-				routeName: "route-for-body-json",
-				opts: []curl.Option{
-					curl.WithBody("hello"),
-				},
-				resp: &testmatchers.HttpResponse{
-					StatusCode: http.StatusBadRequest, // transformation should choke
-				},
-			},
-			{
-				name:      "header to body with json parsing",
-				routeName: "route-for-header-to-body-json",
-				opts: []curl.Option{
-					curl.WithBody(`[3,2,1]`),
-					curl.WithHeader("X-Incoming-Stuff", "super"),
-				},
-				resp: &testmatchers.HttpResponse{
-					StatusCode: http.StatusOK,
-					Headers:    map[string]any{},
-				},
-				req: &testmatchers.HttpRequest{
-					Body: fmt.Sprintf("321-%s", httpbin_echo_base_path),
+				NotHeaders: []string{
+					"x-not-set",
+					"x-empty",
 				},
 			},
 		},
+		{
+			// test 1
+			name:      "basic",
+			routeName: "headers",
+			opts: []curl.Option{
+				curl.WithBody("hello"),
+			},
+			resp: &testmatchers.HttpResponse{
+				StatusCode: http.StatusOK,
+				Headers: map[string]any{
+					"x-foo-response":        "notsuper",
+					"x-foo-response-status": "200",
+					// These are commented out so the testcase will pass on both classic and rustformation
+					// and left here for documentation purpose
+					// There should be a space at the beginning and end but
+					// rust minijinja template rendering seems to right trim the space at the end
+					// "x-space-test": " foobar",
+					// while C++ inja leave the space untouched.
+					// "x-space-test": " foobar ",
+				},
+				NotHeaders: []string{
+					"response-gateway",
+				},
+			},
+			req: &testmatchers.HttpRequest{
+				Headers: map[string]any{
+					"x-foo-bar":  "foolen_5",
+					"x-foo-bar2": "foolen_5",
+					// There should be a space at the beginning and end but
+					// there might be a side effect from the echo server where the header values are trimmed
+					"x-space-test": "foobar",
+				},
+				NotHeaders: []string{
+					// looks like the way we set up transformation targeting gateway, we are
+					// also using RouteTransformation instead of FilterTransformation and it's
+					// set , so it's set at the route table level and if there is a more specific
+					// transformation (eg in vhost or prefix match), the gateway attached transformation
+					// will not apply. Make sure it's not there.
+					"request-gateway",
+				},
+			},
+		},
+		{
+			// test 2
+			name:      "remove headers",
+			routeName: "headers",
+			opts: []curl.Option{
+				curl.WithBody("hello"),
+				curl.WithHeader("x-remove-me", "test"),
+				curl.WithHeader("x-dont-remove-me", "in request"),
+			},
+			resp: &testmatchers.HttpResponse{
+				StatusCode: http.StatusOK,
+				// go-httpbin doesn't allow setting custom response header, so make sure
+				// we get one of the default access-control header and removed the other
+				Headers: map[string]any{
+					"access-control-allow-credentials": "true",
+				},
+				NotHeaders: []string{
+					"access-control-allow-origin",
+				},
+			},
+			req: &testmatchers.HttpRequest{
+				Headers: map[string]any{
+					"x-dont-remove-me": "in request",
+				},
+				NotHeaders: []string{
+					"x-remove-me",
+				},
+			},
+		},
+		{
+			// test 3
+			name:      "set headers with headers already exists multiple times",
+			routeName: "headers",
+			opts: []curl.Option{
+				curl.WithBody("hello"),
+				// The 2 x-foo-bar headers will be replaced with a single one when we set the header
+				// to a value using transformation
+				curl.WithMultiHeader("x-foo-bar", []string{"original_1", "original_2"}),
+			},
+			resp: &testmatchers.HttpResponse{
+				StatusCode: http.StatusOK,
+				Headers: map[string]any{
+					"x-foo-response":        "notsuper",
+					"x-foo-response-status": "200",
+				},
+				NotHeaders: []string{
+					"response-gateway",
+				},
+			},
+			req: &testmatchers.HttpRequest{
+				Headers: map[string]any{
+					"x-foo-bar":  "foolen_5",
+					"x-foo-bar2": "foolen_5",
+				},
+				NotHeaders: []string{
+					// looks like the way we set up transformation targeting gateway, we are
+					// also using RouteTransformation instead of FilterTransformation and it's
+					// set , so it's set at the route table level and if there is a more specific
+					// transformation (eg in vhost or prefix match), the gateway attached transformation
+					// will not apply. Make sure it's not there.
+					"request-gateway",
+				},
+				Body: "hello",
+			},
+		},
+		{
+			// test 4
+			name:      "conditional set by request header", // inja and the request_header function in use
+			routeName: "headers",
+			opts: []curl.Option{
+				curl.WithBody("hello-world"),
+				curl.WithHeader("x-add-bar", "super"),
+			},
+			resp: &testmatchers.HttpResponse{
+				StatusCode: http.StatusOK,
+				Headers: map[string]any{
+					"x-foo-response":        "supersupersuper",
+					"x-foo-response-status": "200",
+				},
+			},
+			req: &testmatchers.HttpRequest{
+				Headers: map[string]any{
+					"x-foo-bar":  "foolen_11",
+					"x-foo-bar2": "foolen_11",
+				},
+				NotHeaders: []string{
+					// looks like the way we set up transformation targeting gateway, we are
+					// also using RouteTransformation instead of FilterTransformation and it's
+					// set , so it's set at the route table level and if there is a more specific
+					// transformation (eg in vhost or prefix match), the gateway attached transformation
+					// will not apply. Make sure it's not there.
+					"request-gateway",
+				},
+			},
+		},
+		{
+			// test 5
+			// When all matching criterion are met, path match takes precedence
+			name:      "match-all",
+			routeName: "match",
+			opts: []curl.Option{
+				curl.WithHeader("foo", "bar"),
+				curl.WithQueryParameters(map[string]string{"test": "123"}),
+			},
+			url: "/path_match/index.html",
+			resp: &testmatchers.HttpResponse{
+				StatusCode: http.StatusOK,
+				Headers: map[string]any{
+					"x-foo-response":  "path matched",
+					"x-path-response": "matched",
+				},
+				NotHeaders: []string{
+					"response-gateway",
+					"x-method-response",
+					"x-header-response",
+					"x-query-response",
+				},
+			},
+			req: &testmatchers.HttpRequest{
+				Headers: map[string]any{
+					"x-foo-request":  "path matched",
+					"x-path-request": "matched",
+				},
+				NotHeaders: []string{
+					"request-gateway",
+					"x-method-request",
+					"x-header-request",
+					"x-query-request",
+				},
+			},
+		},
+		{
+			// test 6
+			// When all matching criterion are met except path, method match takes precedence
+			name:      "match-method-header-and-query",
+			routeName: "match",
+			opts: []curl.Option{
+				curl.WithHeader("foo", "bar"),
+				curl.WithQueryParameters(map[string]string{"test": "123"}),
+			},
+			resp: &testmatchers.HttpResponse{
+				StatusCode: http.StatusOK,
+				Headers: map[string]any{
+					"x-foo-response":    "method matched",
+					"x-method-response": "matched",
+				},
+				NotHeaders: []string{
+					"response-gateway",
+					"x-path-response",
+					"x-header-response",
+					"x-query-response",
+				},
+			},
+			req: &testmatchers.HttpRequest{
+				Headers: map[string]any{
+					"x-foo-request":    "method matched",
+					"x-method-request": "matched",
+				},
+				NotHeaders: []string{
+					"request-gateway",
+					"x-path-request",
+					"x-header-request",
+					"x-query-request",
+				},
+			},
+		},
+		{
+			// test 7
+			// When all matching criterion are met except path and method, header match takes precedence
+			name:      "match-header-and-query",
+			routeName: "match",
+			opts: []curl.Option{
+				curl.WithBody("hello"),
+				curl.WithHeader("foo", "bar"),
+				curl.WithQueryParameters(map[string]string{"test": "123"}),
+			},
+			resp: &testmatchers.HttpResponse{
+				StatusCode: http.StatusOK,
+				Headers: map[string]any{
+					"x-foo-response":    "header matched",
+					"x-header-response": "matched",
+				},
+				NotHeaders: []string{
+					"response-gateway",
+					"x-path-response",
+					"x-method-response",
+					"x-query-response",
+				},
+			},
+			req: &testmatchers.HttpRequest{
+				Headers: map[string]any{
+					"x-foo-request":    "header matched",
+					"x-header-request": "matched",
+				},
+				NotHeaders: []string{
+					"request-gateway",
+					"x-path-request",
+					"x-method-request",
+					"x-query-request",
+				},
+			},
+		},
+		{
+			// test 8
+			name:      "match-query",
+			routeName: "match",
+			opts: []curl.Option{
+				curl.WithBody("hello"),
+				curl.WithQueryParameters(map[string]string{"test": "123"}),
+			},
+			resp: &testmatchers.HttpResponse{
+				StatusCode: http.StatusOK,
+				Headers: map[string]any{
+					"x-foo-response":   "query matched",
+					"x-query-response": "matched",
+				},
+				NotHeaders: []string{
+					"response-gateway",
+					"x-path-response",
+					"x-method-response",
+					"x-header-response",
+				},
+			},
+			req: &testmatchers.HttpRequest{
+				Headers: map[string]any{
+					"x-foo-request":   "query matched",
+					"x-query-request": "matched",
+				},
+				NotHeaders: []string{
+					"request-gateway",
+					"x-path-request",
+					"x-method-request",
+					"x-header-request",
+				},
+			},
+		},
+		{
+			// test 9
+			// Interesting Note: because when a transformation attached to the gateway is set at route-table
+			// level, when nothing match and envoy returns 404, that transformation won't ge applied neither!
+			name:      "match-none",
+			routeName: "match",
+			opts: []curl.Option{
+				curl.WithBody("hello"),
+			},
+			resp: &testmatchers.HttpResponse{
+				StatusCode: http.StatusNotFound,
+				Headers:    map[string]any{
+					// The Gateway attached transformation never apply when no route match
+					//						"response-gateway": "goodbyte",
+				},
+				NotHeaders: []string{
+					"response-gateway",
+					"x-path-response",
+					"x-method-response",
+					"x-header-response",
+					"x-query-response",
+					"x-foo-response",
+				},
+			},
+			req: &testmatchers.HttpRequest{
+				Headers: map[string]any{
+					// The Gateway attached transformation never apply when no route match
+					//						"request-gateway": "hello",
+				},
+				NotHeaders: []string{
+					"request-gateway",
+					"x-path-request",
+					"x-method-request",
+					"x-header-request",
+					"x-foo-request",
+					"x-query-request",
+				},
+			},
+		},
+		{
+			// test 10
+			name:      "custom functions",
+			routeName: "custom-functions",
+			opts: []curl.Option{
+				curl.WithBody(`{"foo":"\"bar\""}`),
+				curl.WithHeader("x-nested-call", "my name is andy"),
+			},
+			resp: &testmatchers.HttpResponse{
+				StatusCode: http.StatusOK,
+				Headers: map[string]any{
+					"x-base64-encode":                   "YmFzZTY0IGVuY29kZSBpbiByZXNwb25zZSBoZWFkZXI=",
+					"x-base64-decode":                   "base64 decode in response header",
+					"x-base64-decode-invalid-non-empty": "foobar",
+					"x-substring":                       "response",
+					"x-substring2":                      "resp",
+					// when the len is invalid, we default to the end of the string
+					"x-substring-invalid2": "response",
+					"x-env":                gomega.MatchRegexp(`default/gw-[a-f0-9]*-[a-z0-9]*`),
+					"x-replace-random":     gomega.MatchRegexp(`.+ be or not .+ be`),
+					// replace_with_random creates a string longer then 4 characters, so if `andy`
+					// is not replaced in the x-nested-call request header, this will not match
+					"x-replace-nested": gomega.MatchRegexp(`my name is .....+`),
+				},
+				NotHeaders: []string{
+					// When decode fail, we return an empty string which in turn becomes a "remove" header ops
+					"x-base64-decode-invalid",
+					// when start is invalid, we return an empty string which in turn becomes a "remove" header ops
+					"x-substring-invalid",
+					"x-env-not-set",
+				},
+			},
+			req: &testmatchers.HttpRequest{
+				Headers: map[string]any{
+					"x-base64-encode":                   "YmFzZTY0IGVuY29kZSBpbiByZXF1ZXN0IGhlYWRlcg==",
+					"x-base64-decode":                   "base64 decode in request header",
+					"x-base64-decode-invalid-non-empty": "foobar",
+					"x-substring":                       "request",
+					"x-substring2":                      "req",
+					// when the len is invalid, we default to the end of the string
+					"x-substring-invalid2": "request",
+					"x-env":                gomega.MatchRegexp(`default/gw-[a-f0-9]*-[a-z0-9]*`),
+					"x-replace-random":     gomega.MatchRegexp(`.+ be or not .+ be`),
+					"content-length":       "31",
+				},
+				NotHeaders: []string{
+					// When decode fail, we return an empty string which in turn becomes a "remove" header ops
+					"x-base64-decode-invalid",
+					// when start is invalid, we return an empty string which in turn becomes a "remove" header ops
+					"x-substring-invalid",
+					"x-env-not-set",
+				},
+				Body: testmatchers.JSONContains([]byte(`{"Foo":"\"bar\""}`)),
+			},
+		},
+		{
+			// test 11
+			name:      "pull json info", // shows we parse the body as json
+			routeName: "route-for-body-json",
+			opts: []curl.Option{
+				curl.WithBody(`{"mykey": {"myinnerkey": "myinnervalue"}}`),
+				curl.WithHeader("X-Incoming-Stuff", "super"),
+			},
+			resp: &testmatchers.HttpResponse{
+				StatusCode: http.StatusOK,
+				Headers: map[string]any{
+					"x-how-great":   "level_super",
+					"from-incoming": "key_level_myinnervalue",
+				},
+				// The test dump the headers field from the echo response into the top level of
+				// the body, so all the request headers would be at the top level of the json body
+				Body: testmatchers.JSONContains([]byte(`{"X-Incoming-Stuff":["super"],"X-Transformed-Incoming":["level_myinnervalue"]}`)),
+			},
+			// Note: for this test, there is a response body transformation setup which extracts just the headers field
+			// When we create the Request Object from the echo response, we accounted for that
+			req: &testmatchers.HttpRequest{
+				Headers: map[string]any{
+					"X-Transformed-Incoming": "level_myinnervalue",
+				},
+			},
+		},
+		{
+			// test 12
+			// The default for Body parsing is AsString which translate to body passthrough (no buffering in envoy)
+			// For this test, the response header transformation is set to try to use the `headers` field in the response
+			// json body, because the body is never parse, so `headers` is undefine and envoy returns 400 response
+			name:      "dont pull info if we dont parse json",
+			routeName: "route-for-body",
+			opts: []curl.Option{
+				curl.WithBody(`{"mykey": {"myinnerkey": "myinnervalue"}}`),
+				curl.WithHeader("X-Incoming-Stuff", "super"),
+			},
+			resp: &testmatchers.HttpResponse{
+				StatusCode: http.StatusBadRequest, // bad transformation results in 400
+				NotHeaders: []string{
+					"x-what-method",
+				},
+			},
+		},
+		{
+			// test 13
+			name:      "dont pull json info if not json", // shows we parse the body as json
+			routeName: "route-for-body-json",
+			opts: []curl.Option{
+				curl.WithBody("hello"),
+			},
+			resp: &testmatchers.HttpResponse{
+				StatusCode: http.StatusBadRequest, // transformation should choke
+			},
+		},
+		{
+			// test 14
+			name:      "header to body with json parsing",
+			routeName: "route-for-header-to-body-json",
+			opts: []curl.Option{
+				curl.WithBody(`[3,2,1]`),
+				curl.WithHeader("X-Incoming-Stuff", "super"),
+			},
+			resp: &testmatchers.HttpResponse{
+				StatusCode: http.StatusOK,
+				Headers:    map[string]any{},
+			},
+			req: &testmatchers.HttpRequest{
+				Body: fmt.Sprintf("321-%s", httpbin_echo_base_path),
+			},
+		},
+	}
+
+	// If no indices are provided, return the full original slice.
+	if len(indices) == 0 {
+		return commonTestCases
+	}
+
+	var selected []transformationTestCase
+
+	for _, index := range indices {
+		if index == -1 {
+			index = len(commonTestCases) - 1
+		}
+
+		if index >= 0 && index < len(commonTestCases) {
+			selected = append(selected, commonTestCases[index])
+		} else {
+			fmt.Printf("warning: Index %d out of bounds. Skipping.\n", index)
+		}
+	}
+
+	return selected
+}
+
+func NewTestingSuite(ctx context.Context, testInst *e2e.TestInstallation) suite.TestingSuite {
+	return &testingSuite{
+		base.NewBaseTestingSuite(ctx, testInst, setup, testCases),
+		// enter a list of indices to select specific tests or -1 for the last test for
+		// local develepment. Default will return all common test cases.
+		selectCommonTestCases(),
 	}
 }
 
@@ -609,12 +658,6 @@ func (s *testingSuite) TestGatewayWithTransformedRoute() {
 
 	testCases := []transformationTestCase{}
 	testCases = append(testCases, s.commonTestCases...)
-	// Leaving this commented out code here for convenience. Comment out the line
-	// above and uncomment the line below so the test will only run the last test
-	// which you just added to save time for developement but make sure to
-	// change this back before committing. This comment hopefully will also
-	// help catch reviewer's eye if they see this.
-	// testCases = append(testCases, s.commonTestCases[len(s.commonTestCases)-1])
 	s.runTestCases((testCases))
 }
 
@@ -698,12 +741,6 @@ func (s *testingSuite) TestGatewayRustformationsWithTransformedRoute() {
 
 	testCases := []transformationTestCase{}
 	testCases = append(testCases, s.commonTestCases...)
-	// Leaving this commented out code here for convenience. Comment out the line
-	// above and uncomment the line below so the test will only run the last test
-	// which you just added to save time for developement but make sure to
-	// change this back before committing. This comment hopefully will also
-	// help catch reviewer's eye if they see this.
-	// testCases = append(testCases, s.commonTestCases[len(s.commonTestCases)-1])
 	s.runTestCases((testCases))
 }
 

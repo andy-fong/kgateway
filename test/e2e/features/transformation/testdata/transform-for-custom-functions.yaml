@@ -73,3 +73,5 @@ spec:
           value: "{{env(\"FOOBAR\")}}"
         - name: x-replace-random
           value: "{{replace_with_random(\"to be or not to be\", \"to\")}}"
+        - name: x-replace-nested
+          value: '{{ replace_with_random(request_header("x-nested-call"), "andy") }}'
