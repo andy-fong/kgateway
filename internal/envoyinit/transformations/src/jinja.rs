@@ -141,6 +141,10 @@ fn replace_with_random(input: &str, to_replace: &str) -> String {
     input.replace(to_replace, &pattern)
 }
 
+fn replace_with_string(input: &str, to_replace: &str, with_string &str) -> String {
+    input.replace(to_replace, with_string)
+}
+
 fn body(state: &State) -> String {
     println!("body() called");
     state
@@ -158,6 +162,12 @@ fn new_jinja_env() -> Environment<'static> {
     println!("new_jinja_env");
     let mut env = Environment::new();
 
+    // if we parseAsJson is used for body parsing. minijinja would prefer the json instead of custom function 
+    // when rendering the template. For example, we have this `env()` function here, if the json body also has 
+    // a field named `env`, the `env()` call in the template will fail to be rendered because minijinja resolves
+    // `env` to the json value from the body and then will complain it's not callable. 
+    // If we are adding any new functions, we should make the function name more uniq to minimize the chance
+    // of collision.
     env.add_function("env", get_env);
     env.add_function("substring", substring);
 
@@ -168,6 +178,7 @@ fn new_jinja_env() -> Environment<'static> {
     env.add_function("base64_decode", base64_decode);
     env.add_function("base64url_decode", base64url_decode);
     env.add_function("replace_with_random", replace_with_random);
+    env.add_function("replace_with_string", replace_with_string);
     env.add_function("raw_string", raw_string);
     //        env.add_function("word_count", word_count);
 

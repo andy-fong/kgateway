@@ -582,10 +582,7 @@ func NewTestingSuite(ctx context.Context, testInst *e2e.TestInstallation) suite.
 				resp: &testmatchers.HttpResponse{
 					StatusCode: http.StatusOK,
 					Headers:    map[string]any{},
-					//					Body:       testmatchers.JSONContains([]byte(fmt.Sprintf(`{"path":"%s"}`, httpbin_echo_base_path))),
 				},
-				// Note: for this test, there is a response body transformation setup which extracts just the headers field
-				// When we create the Request Object from the echo response, we accounted for that
 				req: &testmatchers.HttpRequest{
 					Body: fmt.Sprintf("321-%s", httpbin_echo_base_path),
 				},
@@ -611,8 +608,13 @@ func (s *testingSuite) TestGatewayWithTransformedRoute() {
 	)
 
 	testCases := []transformationTestCase{}
-	//	testCases = append(testCases, s.commonTestCases...)
-	testCases = append(testCases, s.commonTestCases[len(s.commonTestCases)-1])
+	testCases = append(testCases, s.commonTestCases...)
+	// Leaving this commented out code here for convenience. Comment out the line
+	// above and uncomment the line below so the test will only run the last test
+	// which you just added to save time for developement but make sure to
+	// change this back before committing. This comment hopefully will also
+	// help catch reviewer's eye if they see this.
+	// testCases = append(testCases, s.commonTestCases[len(s.commonTestCases)-1])
 	s.runTestCases((testCases))
 }
 
@@ -695,8 +697,13 @@ func (s *testingSuite) TestGatewayRustformationsWithTransformedRoute() {
 	)
 
 	testCases := []transformationTestCase{}
-	//	testCases = append(testCases, s.commonTestCases...)
-	testCases = append(testCases, s.commonTestCases[len(s.commonTestCases)-1])
+	testCases = append(testCases, s.commonTestCases...)
+	// Leaving this commented out code here for convenience. Comment out the line
+	// above and uncomment the line below so the test will only run the last test
+	// which you just added to save time for developement but make sure to
+	// change this back before committing. This comment hopefully will also
+	// help catch reviewer's eye if they see this.
+	// testCases = append(testCases, s.commonTestCases[len(s.commonTestCases)-1])
 	s.runTestCases((testCases))
 }
 
