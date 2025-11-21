@@ -28,6 +28,25 @@ pub struct LocalTransform {
     pub body: Option<BodyTransform>,
 }
 
+impl LocalTransform {
+    pub fn is_empty(&self) -> bool {
+        if !self.add.is_empty() {
+            return false;
+        }
+        if !self.set.is_empty() {
+            return false;
+        }
+        if !self.remove.is_empty() {
+            return false;
+        } 
+
+        match &self.body {
+            Some(config) => { config.is_empty() },
+            None => true,
+        }
+    }
+}
+
 #[derive(Default, Clone, Deserialize)]
 pub struct BodyTransform {
     #[serde(default, rename = "parseAs")]
@@ -36,6 +55,14 @@ pub struct BodyTransform {
     pub value: String,
 }
 
+impl BodyTransform {
+    pub fn is_empty(&self) -> bool {
+        if self.value.is_empty() && matches!(self.parse_as, BodyParseBehavior::AsString) {
+            return true;
+        }
+        false
+    }
+}
 #[derive(Default, Clone, Deserialize)]
 pub struct NameValuePair {
     pub name: String,
@@ -43,7 +70,7 @@ pub struct NameValuePair {
     pub value: String,
 }
 
-#[derive(Default, Debug, Clone, Deserialize)]
+#[derive(Default, Clone, Deserialize)]
 pub enum BodyParseBehavior {
     #[default]
     AsString,

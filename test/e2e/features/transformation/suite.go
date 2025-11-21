@@ -845,7 +845,7 @@ func (s *testingSuite) assertRouteAndTrafficPolicyStatus(routesToCheck, trafficP
 			}
 
 			actualPolicyStatus := tp.Status
-			g.Expect(actualPolicyStatus.Ancestors).To(gomega.HaveLen(1), "should have one ancestor")
+			g.Expect(actualPolicyStatus.Ancestors).To(gomega.HaveLen(1), "%s should have one ancestor", trafficPolicyName)
 			ancestorStatus := actualPolicyStatus.Ancestors[0]
 			cond := meta.FindStatusCondition(ancestorStatus.Conditions, expectedCond.Type)
 			g.Expect(cond).NotTo(gomega.BeNil())

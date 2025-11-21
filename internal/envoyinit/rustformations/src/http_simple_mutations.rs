@@ -4,7 +4,7 @@ use once_cell::sync::Lazy;
 use serde::Deserialize;
 use serde_json::Value as JsonValue;
 use std::collections::HashMap;
-use transformations::{LocalTransformationConfig, TransformationError, TransformationOps};
+use transformations::{LocalTransform, LocalTransformationConfig, TransformationError, TransformationOps};
 
 #[cfg(test)]
 use mockall::*;
@@ -93,29 +93,6 @@ impl TransformationOps for EnvoyTransformationOps<'_> {
     fn append_response_body(&mut self, data: &[u8]) -> bool {
         self.envoy_filter.append_response_body(data)
     }
-    /*
-       TODO: was trying to use this to store the pattern in the request context that can be re-used
-             for all replace_with_random() custom function but have not been able to find a way to
-             do that yet with rust and minijinja
-
-       fn get_random_pattern(&mut self, key: &str) -> String {
-           let map = self.random_pattern_map.get_or_insert_with(HashMap::new);
-
-           if let Some(pattern) = map.get(key) {
-               return pattern.clone();
-           }
-
-           let new_pattern = rand::thread_rng()
-               .sample_iter(&Alphanumeric)
-               .take(8)
-               .map(char::from)
-               .collect()
-
-           map.insert(key.to_string(), new_pattern.clone());
-
-           new_pattern
-       }
-    */
 }
 
 impl FilterConfig {
@@ -213,13 +190,43 @@ impl Filter {
         self.request_headers_map.as_ref().unwrap_or(&EMPTY_MAP)
     }
 
-    fn transform_request<EHF: EnvoyHttpFilter>(&self, envoy_filter: &mut EHF) -> bool {
-        let request_transform = match self.get_per_route_config() {
+    // set_per_route_config() has to be called before calling this function
+    fn get_request_transform(&self) -> &Option<LocalTransform> {
+        match self.get_per_route_config() {
             Some(config) => &config.transformations.request,
             None => &self.filter_config.transformations.request,
+        }
+    }
+
+    // set_per_route_config() has to be called before calling this function
+    fn has_request_transform(&self) -> bool {
+        let Some(transform) = self.get_request_transform() else {
+            return false;
         };
 
-        if let Some(transform) = request_transform {
+        !transform.is_empty()
+    }
+
+    // set_per_route_config() has to be called before calling this function
+    fn get_response_transform(&self) -> &Option<LocalTransform> {
+        match self.get_per_route_config() {
+            Some(config) => &config.transformations.response,
+            None => &self.filter_config.transformations.response,
+        }
+    }
+
+    // set_per_route_config() has to be called before calling this function
+    fn has_response_transform(&self) -> bool {
+        let Some(transform) = self.get_response_transform() else {
+            return false;
+        };
+
+        !transform.is_empty()
+    }
+
+    fn transform_request<EHF: EnvoyHttpFilter>(&self, envoy_filter: &mut EHF) -> bool {
+
+        if let Some(transform) = self.get_request_transform() {
             match transformations::jinja::transform_request(
                 transform,
                 self.get_request_headers_map(),
@@ -250,13 +257,7 @@ impl Filter {
     }
 
     fn transform_response<EHF: EnvoyHttpFilter>(&self, envoy_filter: &mut EHF) -> bool {
-        let response_transform = match self.get_per_route_config() {
-            Some(config) => &config.transformations.response,
-            None => &self.filter_config.transformations.response,
-        };
-
-        if let Some(transform) = response_transform {
-            // TODO(nfuden): find someone who knows rust to see if we really need this Hash map for serialization
+        if let Some(transform) = self.get_response_transform() {
             let response_headers_map = self.create_headers_map(envoy_filter.get_response_headers());
 
             match transformations::jinja::transform_response(
@@ -297,8 +298,12 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
         envoy_filter: &mut EHF,
         _end_of_stream: bool,
     ) -> abi::envoy_dynamic_module_type_on_http_filter_request_headers_status {
-        // TODO: need to test if we get called even if there is no transformation setting
-        //       if yes, we need to short circuit here and return Continue
+        self.set_per_route_config(envoy_filter);
+        if !self.has_request_transform() {
+            envoy_log_trace!("on_request_headers skipping");
+            return abi::envoy_dynamic_module_type_on_http_filter_request_headers_status::Continue;
+        }
+
         if !_end_of_stream {
             // TODO: this here always stop iteration to wait for the full request body,
             //       need to support body passthrough
@@ -308,8 +313,6 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
         }
         envoy_log_trace!("on_request_headers");
 
-        self.set_per_route_config(envoy_filter);
-        // TODO(nfuden): find someone who knows rust to see if we really need this Hash map for serialization
         self.populate_request_headers_map(envoy_filter.get_request_headers());
         if self.transform_request(envoy_filter) {
             return abi::envoy_dynamic_module_type_on_http_filter_request_headers_status::Continue;
@@ -322,8 +325,12 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
         envoy_filter: &mut EHF,
         end_of_stream: bool,
     ) -> abi::envoy_dynamic_module_type_on_http_filter_request_body_status {
-        // TODO: need to test if we get called even if there is no transformation setting
-        //       if yes, we need to short circuit here and return Continue
+        self.set_per_route_config(envoy_filter);
+        if !self.has_request_transform() {
+            envoy_log_trace!("on_request_body skipping");
+            return abi::envoy_dynamic_module_type_on_http_filter_request_body_status::Continue;
+        }
+
         if !end_of_stream {
             envoy_log_trace!("on_request_body buffering");
             // TODO: Technically, we don't need to buffer the body yet as we don't support parsing the body now
@@ -334,8 +341,6 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
         }
         envoy_log_trace!("on_request_body");
 
-        self.set_per_route_config(envoy_filter);
-        // TODO(nfuden): find someone who knows rust to see if we really need this Hash map for serialization
         self.populate_request_headers_map(envoy_filter.get_request_headers());
         if self.transform_request(envoy_filter) {
             return abi::envoy_dynamic_module_type_on_http_filter_request_body_status::Continue;
@@ -346,17 +351,21 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
     fn on_response_headers(
         &mut self,
         envoy_filter: &mut EHF,
-        _end_of_stream: bool,
+        end_of_stream: bool,
     ) -> abi::envoy_dynamic_module_type_on_http_filter_response_headers_status {
-        envoy_log_trace!("on_response_headers");
-        if !_end_of_stream {
+        self.set_per_route_config(envoy_filter);
+        if !self.has_response_transform() {
+            envoy_log_trace!("on_response_header skipping");
+            return abi::envoy_dynamic_module_type_on_http_filter_response_headers_status::Continue;
+        }
+
+        if !end_of_stream {
             // TODO: this here always stop iteration to wait for the full request body,
             //       need to support body passthrough
             envoy_log_trace!("on_response_headers buffering");
             return abi::envoy_dynamic_module_type_on_http_filter_response_headers_status::StopIteration;
         }
-        self.set_per_route_config(envoy_filter);
-        // TODO(nfuden): find someone who knows rust to see if we really need this Hash map for serialization
+        envoy_log_trace!("on_response_headers");
         self.populate_request_headers_map(envoy_filter.get_request_headers());
         if self.transform_response(envoy_filter) {
             return abi::envoy_dynamic_module_type_on_http_filter_response_headers_status::Continue;
@@ -369,9 +378,11 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
         envoy_filter: &mut EHF,
         end_of_stream: bool,
     ) -> abi::envoy_dynamic_module_type_on_http_filter_response_body_status {
-        envoy_log_trace!("on_response_body");
-        // TODO: need to test if we get called even if there is no transformation setting
-        //       if yes, we need to short circuit here and return Continue
+        self.set_per_route_config(envoy_filter);
+        if !self.has_response_transform() {
+            envoy_log_trace!("on_response_body skipping");
+            return abi::envoy_dynamic_module_type_on_http_filter_response_body_status::Continue;
+        }
         if !end_of_stream {
             envoy_log_trace!("on_response_body buffering");
             // TODO: Technically, we don't need to buffer the body yet as we don't support parsing the body now
@@ -380,9 +391,8 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
             //       if this is the desired behavior when we implement parsing the body
             return abi::envoy_dynamic_module_type_on_http_filter_response_body_status::StopIterationAndBuffer;
         }
+        envoy_log_trace!("on_response_body");
 
-        self.set_per_route_config(envoy_filter);
-        // TODO(nfuden): find someone who knows rust to see if we really need this Hash map for serialization
         self.populate_request_headers_map(envoy_filter.get_request_headers());
         if self.transform_response(envoy_filter) {
             return abi::envoy_dynamic_module_type_on_http_filter_response_body_status::Continue;
