@@ -27,6 +27,9 @@ impl<'a> EnvoyTransformationOps<'a> {
     }
 }
 impl TransformationOps for EnvoyTransformationOps<'_> {
+    fn add_request_header(&mut self, key: &str, value: &[u8]) -> bool {
+        self.envoy_filter.add_request_header(key, value)
+    }
     fn set_request_header(&mut self, key: &str, value: &[u8]) -> bool {
         self.envoy_filter.set_request_header(key, value)
     }
@@ -62,6 +65,9 @@ impl TransformationOps for EnvoyTransformationOps<'_> {
         self.envoy_filter.append_request_body(data)
     }
 
+    fn add_response_header(&mut self, key: &str, value: &[u8]) -> bool {
+        self.envoy_filter.add_response_header(key, value)
+    }
     fn set_response_header(&mut self, key: &str, value: &[u8]) -> bool {
         self.envoy_filter.set_response_header(key, value)
     }

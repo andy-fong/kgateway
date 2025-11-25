@@ -380,7 +380,34 @@ pub fn transform_request<T: TransformationOps>(
         }
     }
 
-    // TODO: "add" header is not supported by the rust SDK yet
+    for NameValuePair { name: key, value } in &transform.add {
+        if value.is_empty() {
+            continue;
+        }
+        let rendered = match render(env, &ctx, value, parsed_body_as_json) {
+            Ok(str) => Some(str),
+            Err(err) => {
+                if let Some(e) = err.downcast_ref::<TransformationError>() {
+                    match e {
+                        TransformationError::UndeclaredJsonVariables(_) => {
+                            abort_processing = true;
+                        }
+                    }
+                }
+                errors.push(err);
+                None
+            }
+        };
+
+        if abort_processing {
+            return Err(errors.pop().unwrap());
+        }
+
+        if rendered.as_deref().is_some_and(|s| !s.is_empty()) {
+            ops.add_request_header(key, rendered.as_deref().unwrap().as_bytes());
+        }
+    }
+
 
     for key in &transform.remove {
         ops.remove_request_header(key);
@@ -514,7 +541,33 @@ pub fn transform_response<T: TransformationOps>(
         }
     }
 
-    // TODO: "add" header is not supported by the rust SDK yet
+    for NameValuePair { name: key, value } in &transform.add {
+        if value.is_empty() {
+            continue;
+        }
+        let rendered = match render(env, &ctx, value, parsed_body_as_json) {
+            Ok(str) => Some(str),
+            Err(err) => {
+                if let Some(e) = err.downcast_ref::<TransformationError>() {
+                    match e {
+                        TransformationError::UndeclaredJsonVariables(_) => {
+                            abort_processing = true;
+                        }
+                    }
+                }
+                errors.push(err);
+                None
+            }
+        };
+
+        if abort_processing {
+            return Err(errors.pop().unwrap());
+        }
+
+        if rendered.as_deref().is_some_and(|s| !s.is_empty()) {
+            ops.add_response_header(key, rendered.as_deref().unwrap().as_bytes());
+        }
+    }
 
     for key in &transform.remove {
         ops.remove_response_header(key);
