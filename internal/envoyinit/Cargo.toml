@@ -5,3 +5,6 @@ members = [
     "transformations",
 ]
 default-members = ["rustformations"]
+
+[patch."https://github.com/envoyproxy/envoy"]
+envoy-proxy-dynamic-modules-rust-sdk = { path = "patched-envoy-sdk/envoy-proxy-dynamic-modules-rust-sdk/dynamic_modules/sdk/rust" }
