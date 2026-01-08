@@ -5,9 +5,11 @@ import (
 	"fmt"
 	"slices"
 
+	exteniondynamicmodulev3 "github.com/envoyproxy/go-control-plane/envoy/extensions/dynamic_modules/v3"
 	dynamicmodulesv3 "github.com/envoyproxy/go-control-plane/envoy/extensions/filters/http/dynamic_modules/v3"
 	transformationpb "github.com/solo-io/envoy-gloo/go/config/filter/http/transformation/v2"
 	"google.golang.org/protobuf/types/known/anypb"
+	"google.golang.org/protobuf/types/known/wrapperspb"
 
 	"github.com/kgateway-dev/kgateway/v2/pkg/kgateway/utils"
 	"github.com/kgateway-dev/kgateway/v2/pkg/pluginsdk/ir"
@@ -276,7 +278,17 @@ func mergeRustformation(
 
 	case policy.AugmentedDeepMerge, policy.OverridableDeepMerge:
 		if p1.spec.rustformation == nil {
-			p1.spec.rustformation = &rustformationIR{config: &dynamicmodulesv3.DynamicModuleFilterPerRoute{}}
+			filterCfg, _ := utils.MessageToAny(&wrapperspb.StringValue{
+				Value: "{}",
+			})
+			p1.spec.rustformation = &rustformationIR{config: &dynamicmodulesv3.DynamicModuleFilterPerRoute{
+				DynamicModuleConfig: &exteniondynamicmodulev3.DynamicModuleConfig{
+					Name: "rust_module",
+				},
+				PerRouteConfigName: "http_simple_mutations",
+				FilterConfig:       filterCfg,
+			}}
+
 		}
 		// Always Concat so that the original slice in the IR is never modified
 		logger.Info("rustformation: deepmerge")
