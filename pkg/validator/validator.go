@@ -13,7 +13,7 @@ import (
 var (
 	defaultEnvoyPath = "/usr/local/bin/envoy"
 	// TODO(tim): avoid hardcoding the envoy image version in multiple places.
-	//	defaultEnvoyImage = "quay.io/solo-io/envoy-gloo:1.36.3-patch1"
+	//	defaultEnvoyImage = "quay.io/solo-io/envoy-gloo:1.36.4-patch1"
 	defaultEnvoyImage = "ghcr.io/kgateway-dev/envoy-wrapper:v2.2.0-beta.4"
 )
 
