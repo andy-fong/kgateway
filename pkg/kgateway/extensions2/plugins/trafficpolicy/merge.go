@@ -38,6 +38,7 @@ func MergeTrafficPolicies(
 	mergeOrigins ir.MergeOrigins,
 	tpOpts TrafficPolicyMergeOpts,
 ) {
+	logger.Info("MergeTrafficPolicies: merge")
 	if p1 == nil || p2 == nil {
 		return
 	}
@@ -66,6 +67,7 @@ func MergeTrafficPolicies(
 	}
 
 	for _, mergeFunc := range mergeFuncs {
+		logger.Info("merging", "p1", p1, "p2", p2)
 		mergeFunc(p1, p2, p2Ref, p2MergeOrigins, opts, mergeOrigins, tpOpts)
 	}
 }
@@ -78,6 +80,7 @@ func mergeTrafficPolicies(
 	mergeOrigins ir.MergeOrigins,
 	mergeSettingsJSON string,
 ) {
+	logger.Info("mergeTrafficPolicies")
 	var polMergeOpts mergeOpts
 	if mergeSettingsJSON != "" {
 		err := json.Unmarshal([]byte(mergeSettingsJSON), &polMergeOpts)
@@ -170,6 +173,7 @@ func mergeTransformation(
 	mergeOrigins ir.MergeOrigins,
 	tpOpts TrafficPolicyMergeOpts,
 ) {
+	logger.Info("mergeTransformation called", "tpOpts.Transforamtion", tpOpts.Transformation)
 	if tpOpts.Transformation != "" {
 		// this is merging 2 policies at the same hierarchical level (no parent->child relationship),
 		// so use tpOpts since it overrides the default merge strategy
@@ -257,7 +261,9 @@ func mergeRustformation(
 	mergeOrigins ir.MergeOrigins,
 	tpOpts TrafficPolicyMergeOpts,
 ) {
+	logger.Info("mergeRustformation called", "tpOpts.Transforamtion", tpOpts.Transformation)
 	if tpOpts.Transformation != "" {
+		logger.Info("mergeRustformation interalMergeStrategy")
 		// this is merging 2 policies at the same hierarchical level (no parent->child relationship),
 		// so use tpOpts since it overrides the default merge strategy
 		opts.Strategy = policy.ToInternalMergeStrategy(tpOpts.Transformation)
@@ -288,7 +294,6 @@ func mergeRustformation(
 				PerRouteConfigName: "http_simple_mutations",
 				FilterConfig:       filterCfg,
 			}}
-
 		}
 		// Always Concat so that the original slice in the IR is never modified
 		logger.Info("rustformation: deepmerge")

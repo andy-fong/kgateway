@@ -8,10 +8,12 @@ import (
 	"slices"
 
 	apiannotations "github.com/kgateway-dev/kgateway/v2/api/annotations"
+	"github.com/kgateway-dev/kgateway/v2/pkg/logging"
 	"github.com/kgateway-dev/kgateway/v2/pkg/pluginsdk/ir"
 )
 
 var ErrUnsupportedMergeStrategy = errors.New("unsupported merge strategy")
+var logger = logging.New("merge")
 
 // MergeStrategy defines how two policies should be merged
 type MergeStrategy string
@@ -135,13 +137,16 @@ func MergePolicies[T any](
 	mergeFn func(*T, *T, *ir.AttachedPolicyRef, ir.MergeOrigins, MergeOptions, ir.MergeOrigins, string),
 	mergeSettingsJSON string,
 ) ir.PolicyAtt {
+	logger.Info("MergePolicies: merge")
 	var out ir.PolicyAtt
 	if len(policies) == 0 {
+		logger.Info("MergePolicies: merge no polices")
 		return out
 	}
 	_, ok := any(policies[0].PolicyIr).(*T)
 	// ignore unknown types
 	if !ok {
+		logger.Info("MergePolicies: merge unknown types")
 		return out
 	}
 
@@ -156,6 +161,7 @@ func MergePolicies[T any](
 	for _, hierarchicalPriority := range slices.Backward(slices.Sorted(maps.Keys(policiesByHierarchy))) {
 		tmp := merge(policiesByHierarchy[hierarchicalPriority], true, mergeFn, mergeSettingsJSON)
 		mergedByHierarchy = append(mergedByHierarchy, tmp)
+		logger.Info("MergePolicies:", "mergedByHierarchy", len(mergedByHierarchy))
 	}
 	// mergeSettings does not apply when merging across hierarchies, so we pass an empty string
 	out = merge(mergedByHierarchy, false, mergeFn, "")

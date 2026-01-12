@@ -47,6 +47,7 @@ func constructTransformation(in *kgateway.TrafficPolicy, out *trafficPolicySpecI
 	if in.Spec.Transformation == nil || useRustformations {
 		return
 	}
+	logger.Info("merge: constructTransformation")
 	transformation := toTransformFilterConfig(in.Spec.Transformation)
 	out.transformation = &transformationIR{
 		config: transformation,
@@ -195,8 +196,10 @@ func constructRustformation(in *kgateway.TrafficPolicy, out *trafficPolicySpecIr
 	if in.Spec.Transformation == nil || !useRustformations {
 		return nil
 	}
+	logger.Info("merge: constructRustformation")
 	rustformation, err := toRustFormationPerRouteConfig(in.Spec.Transformation)
 	if err != nil {
+		logger.Info("merge: constructRustformation", "err", err.Error())
 		return err
 	}
 	out.rustformation = &rustformationIR{

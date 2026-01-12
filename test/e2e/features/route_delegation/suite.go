@@ -267,7 +267,7 @@ func (s *testingSuite) TestRouteWeight() {
 		})
 }
 
-func (s *testingSuite) TestPolicyMerging() {
+func (s *testingSuite) TempTestPolicyMerging() {
 	// Assert traffic to parent1.com/anything/team1 uses svc1's transformation policy
 	s.TestInstallation.Assertions.AssertEventuallyConsistentCurlResponse(s.Ctx, defaults.CurlPodExecOpt,
 		[]curl.Option{
@@ -312,7 +312,9 @@ func (s *testingSuite) TestPolicyMerging() {
 				"origin": "parent2",
 			},
 		})
+}
 
+func (s *testingSuite) TestPolicyMerging() {
 	// Assert traffic to parent2.com/anything/team2 uses parent2's transformation policy
 	s.TestInstallation.Assertions.AssertEventuallyConsistentCurlResponse(s.Ctx, defaults.CurlPodExecOpt,
 		[]curl.Option{

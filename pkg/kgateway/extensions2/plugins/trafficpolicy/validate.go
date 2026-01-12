@@ -65,6 +65,7 @@ func validateXDS(ctx context.Context, p *TrafficPolicy, v validator.Validator) e
 		return fmt.Errorf("failed to get HTTP filters for validation: %w", err)
 	}
 	for _, stagedFilter := range httpFilters {
+		fmt.Printf("andy: adding filter %v\n", stagedFilter.Filter.Name)
 		builder.AddHttpFilter(stagedFilter.Filter)
 	}
 

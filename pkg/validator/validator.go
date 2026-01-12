@@ -76,6 +76,7 @@ func NewDocker(img ...string) Validator {
 }
 
 func (d *dockerValidator) Validate(ctx context.Context, json string) error {
+	fmt.Printf("andy: %s\n", json)
 	cmd := exec.CommandContext( //nolint:gosec // G204: docker command with controlled args for config validation
 		ctx,
 		"docker", "run",

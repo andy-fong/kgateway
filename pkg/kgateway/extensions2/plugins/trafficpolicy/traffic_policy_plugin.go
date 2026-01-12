@@ -2,6 +2,7 @@ package trafficpolicy
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	envoyroutev3 "github.com/envoyproxy/go-control-plane/envoy/config/route/v3"
@@ -19,6 +20,7 @@ import (
 	envoyrbacv3 "github.com/envoyproxy/go-control-plane/envoy/extensions/filters/http/rbac/v3"
 	envoytlsv3 "github.com/envoyproxy/go-control-plane/envoy/extensions/transport_sockets/tls/v3"
 	envoy_wellknown "github.com/envoyproxy/go-control-plane/pkg/wellknown"
+
 	// TODO(nfuden): remove once rustformations are able to be used in a production environment
 	transformationpb "github.com/solo-io/envoy-gloo/go/config/filter/http/transformation/v2"
 	"google.golang.org/protobuf/types/known/anypb"
@@ -250,7 +252,7 @@ var useRustformations bool
 func NewPlugin(ctx context.Context, commoncol *collections.CommonCollections, mergeSettings string, v validator.Validator) sdk.Plugin {
 	useRustformations = commoncol.Settings.UseRustFormations // stash the state of the env setup for rustformation usage
 	if useRustformations {
-		logger.Info("transformation is using Rust Dynamic Module.")
+		logger.Info("andy: transformation is using Rust Dynamic Module.")
 	}
 
 	cli := kclient.NewFilteredDelayed[*kgateway.TrafficPolicy](
@@ -435,6 +437,9 @@ func (p *trafficPolicyPluginGwPass) HttpFilters(_ ir.HttpFiltersContext, fcc ir.
 	}
 
 	// register classic transforms
+	fmt.Printf("andy: tranformation in chain:\n%v\n", p.setTransformationInChain)
+	fmt.Printf("andy: useRustformations: %v\n", useRustformations)
+	fmt.Printf("andy: fcc.FilterChainName: %v\n", fcc.FilterChainName)
 	if p.setTransformationInChain[fcc.FilterChainName] && !useRustformations {
 		// TODO(nfuden): support stages such as early
 		transformationCfg := transformationpb.FilterTransformations{}
@@ -469,6 +474,7 @@ func (p *trafficPolicyPluginGwPass) HttpFilters(_ ir.HttpFiltersContext, fcc ir.
 		)
 		rustFilter.Filter.Disabled = true
 		stagedFilters = append(stagedFilters, rustFilter)
+		fmt.Printf("andy: added Rustformation:%v\n", stagedFilters)
 	}
 
 	// Add global ExtAuth disable filter when there are providers

@@ -46,6 +46,8 @@ pub struct BodyTransform {
     pub parse_as: BodyParseBehavior,
     #[serde(default)]
     pub value: String,
+    #[serde(skip)]
+    pub tmpl: minijinja::Template<'static>,
 }
 
 impl BodyTransform {
@@ -67,6 +69,8 @@ pub struct NameValuePair {
     pub name: String,
     #[serde(default)]
     pub value: String,
+    #[serde(skip)]
+    pub tmpl: minijinja::Template<'static>,
 }
 
 #[derive(Default, Clone, Deserialize)]

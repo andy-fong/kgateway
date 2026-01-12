@@ -105,6 +105,7 @@ func addMergeOriginsToFilterMetadata(
 	mergeOrigins ir.MergeOrigins,
 	metadata *envoycorev3.Metadata,
 ) *envoycorev3.Metadata {
+	logger.Info("merge: addMergeOriginsToFilterMetadata", "gk", gk)
 	if !mergeOrigins.IsSet() {
 		return metadata
 	}

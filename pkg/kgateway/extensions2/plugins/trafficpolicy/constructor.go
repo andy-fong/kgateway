@@ -51,6 +51,7 @@ func (c *TrafficPolicyConstructor) ConstructIR(
 
 	var errors []error
 
+	logger.Info("merge: ConstructIR")
 	// Construct transformation specific IR
 	constructTransformation(policyCR, &outSpec)
 	// Construct rustformation specific IR

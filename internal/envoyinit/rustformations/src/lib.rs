@@ -78,6 +78,7 @@ fn new_http_filter_per_route_config_fn(name: &str, config: &[u8]) -> Option<Box<
         }
     };
     envoy_log_trace!("new_http_filter_per_route_config_fn: per_route_config: {per_route_config}");
+    envoy_log_debug!("new_http_filter_per_route_config_fn: per_route_config: {per_route_config}");
     match name {
         "http_simple_mutations" => http_simple_mutations::PerRouteConfig::new(per_route_config)
             .map(|config| Box::new(config) as Box<dyn Any>),
