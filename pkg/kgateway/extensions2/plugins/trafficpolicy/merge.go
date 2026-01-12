@@ -240,7 +240,6 @@ func mergeRustFormationRequestResponseJson(field string, m1, m2 map[string]any) 
 }
 
 func mergeRustformationJsonInPlace(obj1, obj2 any) error {
-	// 1. Assert both objects are maps
 	m1, ok1 := obj1.(map[string]any)
 	m2, ok2 := obj2.(map[string]any)
 	if !ok1 || !ok2 {
@@ -261,16 +260,13 @@ func mergeRustformation(
 	mergeOrigins ir.MergeOrigins,
 	tpOpts TrafficPolicyMergeOpts,
 ) {
-	logger.Info("mergeRustformation called", "tpOpts.Transforamtion", tpOpts.Transformation)
 	if tpOpts.Transformation != "" {
-		logger.Info("mergeRustformation interalMergeStrategy")
 		// this is merging 2 policies at the same hierarchical level (no parent->child relationship),
 		// so use tpOpts since it overrides the default merge strategy
 		opts.Strategy = policy.ToInternalMergeStrategy(tpOpts.Transformation)
 	}
 
 	if !policy.IsMergeable(p1.spec.rustformation, p2.spec.rustformation, opts) {
-		logger.Info("not mergeable")
 		return
 	}
 
@@ -295,20 +291,15 @@ func mergeRustformation(
 				FilterConfig:       filterCfg,
 			}}
 		}
-		// Always Concat so that the original slice in the IR is never modified
-		logger.Info("rustformation: deepmerge")
-
 		p1Json, err := utils.AnyToJson(p1.spec.rustformation.config.FilterConfig)
 		if err != nil {
 			logger.Error("failed to convert p1 config to json", "error", err.Error())
-		} else if p1Json != nil {
-			logger.Info("rustformation", "p1", p1Json)
+			return
 		}
 		p2Json, err := utils.AnyToJson(p2.spec.rustformation.config.FilterConfig)
 		if err != nil {
 			logger.Error("failed to convert p2 config to json", "error", err.Error())
-		} else if p2Json != nil {
-			logger.Info("rustformation", "p2", p2Json)
+			return
 		}
 
 		var anyMsg *anypb.Any

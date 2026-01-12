@@ -35,7 +35,7 @@ impl TransformationOps for EnvoyTransformationOps<'_> {
     }
 
     #[cfg(not(target_arch = "x86_64"))]
-    fn add_request_header(&mut self, key: &str, value: &[u8]) -> bool {
+    fn add_request_header(&mut self, _key: &str, _value: &[u8]) -> bool {
         true
     }
 
@@ -82,7 +82,7 @@ impl TransformationOps for EnvoyTransformationOps<'_> {
         self.envoy_filter.add_response_header(key, value)
     }
     #[cfg(not(target_arch = "x86_64"))]
-    fn add_response_header(&mut self, key: &str, value: &[u8]) -> bool {
+    fn add_response_header(&mut self, _key: &str, _value: &[u8]) -> bool {
         true
     }
     fn set_response_header(&mut self, key: &str, value: &[u8]) -> bool {
