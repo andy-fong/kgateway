@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 use envoy_proxy_dynamic_modules_rust_sdk::*;
+use minijinja::Environment;
 use once_cell::sync::Lazy;
-use serde::Deserialize;
 use serde_json::Value as JsonValue;
 use std::collections::HashMap;
 use transformations::{
@@ -12,9 +12,10 @@ use transformations::{
 use mockall::*;
 
 static EMPTY_MAP: Lazy<HashMap<String, String>> = Lazy::new(HashMap::new);
-#[derive(Deserialize, Clone)]
+#[derive(Clone)]
 pub struct FilterConfig {
     transformations: LocalTransformationConfig,
+    env: Environment<'static>,
 }
 
 struct EnvoyTransformationOps<'a> {
@@ -59,13 +60,13 @@ impl TransformationOps for EnvoyTransformationOps<'_> {
         serde_json::from_slice(&body).context("failed to parse request body as json")
     }
     fn get_request_body(&mut self) -> Vec<u8> {
-        if let Some(buffers) = self.envoy_filter.get_buffered_request_body() {
-            // TODO: implement Reader for EnvoyBuffer and use serde_json::from_reader to avoid making copy first?
-            let chunks: Vec<_> = buffers.iter().map(|b| b.as_slice()).collect();
-            chunks.concat();
-        }
+        let Some(buffers) = self.envoy_filter.get_buffered_request_body() else {
+            return Vec::default();
+        };
 
-        Vec::default()
+        // TODO: implement Reader for EnvoyBuffer and use serde_json::from_reader to avoid making copy first?
+        let chunks: Vec<_> = buffers.iter().map(|b| b.as_slice()).collect();
+        chunks.concat()
     }
     fn drain_request_body(&mut self, number_of_bytes: usize) -> bool {
         self.envoy_filter
@@ -124,7 +125,7 @@ impl FilterConfig {
     /// filter_config is the filter config from the Envoy config here:
     /// https://www.envoyproxy.io/docs/envoy/latest/api-v3/extensions/dynamic_modules/v3/dynamic_modules.proto#envoy-v3-api-msg-extensions-dynamic-modules-v3-dynamicmoduleconfig
     pub fn new(filter_config: &str) -> Option<Self> {
-        let config: LocalTransformationConfig = match serde_json::from_str(filter_config) {
+        let mut config: LocalTransformationConfig = match serde_json::from_str(filter_config) {
             Ok(cfg) => cfg,
             Err(err) => {
                 // Dont panic if there is incorrect configuration
@@ -132,8 +133,18 @@ impl FilterConfig {
                 return None;
             }
         };
+
+        let env = match config.compile_templates() {
+            Ok(env) => env,
+            Err(err) => {
+                envoy_log_error!("error compiling templates: {err}");
+                return None;
+            }
+        };
+
         Some(FilterConfig {
             transformations: config,
+            env,
         })
     }
 }
@@ -250,6 +261,7 @@ impl Filter {
     fn transform_request<EHF: EnvoyHttpFilter>(&self, envoy_filter: &mut EHF) -> bool {
         if let Some(transform) = self.get_request_transform() {
             match transformations::jinja::transform_request(
+                &self.filter_config.env,
                 transform,
                 self.get_request_headers_map(),
                 EnvoyTransformationOps::new(envoy_filter),
@@ -283,6 +295,7 @@ impl Filter {
             let response_headers_map = self.create_headers_map(envoy_filter.get_response_headers());
 
             match transformations::jinja::transform_response(
+                &self.filter_config.env,
                 transform,
                 self.get_request_headers_map(),
                 &response_headers_map,
@@ -446,7 +459,7 @@ mod tests {
         {
           "request": {
             "set": [
-              { "name": "X-substring", "value": "{{substring(\"ENVOYPROXY something\", 5, 10) }}" },
+              { "name": "X-substring", "value": "{{substring(\"ENVOYPROXY something\", 5, 5) }}" },
               { "name": "X-substring-no-3rd", "value": "{{substring(\"ENVOYPROXY something\", 5) }}" },
               { "name": "X-donor-header-contents", "value": "{{ header(\"x-donor\") }}" },
               { "name": "X-donor-header-substringed", "value": "{{ substring( header(\"x-donor\"), 0, 7)}}" }

@@ -157,7 +157,7 @@ fn context(state: &State) -> minijinja::Value {
     state.lookup(STATE_LOOKUP_KEY_CONTEXT).unwrap_or_default()
 }
 
-fn new_jinja_env() -> Environment<'static> {
+pub fn new_jinja_env() -> Environment<'static> {
     let mut env = Environment::new();
 
     // if parseAsJson is used for body parsing. minijinja would prefer the json instead of custom function
@@ -207,8 +207,8 @@ fn render(
     parsed_body_as_json: bool,
 ) -> Result<String> {
     let tmpl = env
-        .template_from_str(template)
-        .with_context(|| format!("error creating jinja template {}", template))?;
+        .get_template(template)
+        .with_context(|| format!("error looking up jinja template {}", template))?;
     if !parsed_body_as_json {
         // This is to mimic the C++ behavior when a transformation is used that needs
         // the body is parsed as json but it's not enabled. So, we try to detect if
@@ -264,11 +264,11 @@ fn combine_errors(msg: &str, errors: Vec<Error>) -> Result<()> {
 /// On body parsing as json error, we return error immediately so we can send a
 /// 400 response back
 pub fn transform_request<T: TransformationOps>(
+    env: &Environment<'static>,
     transform: &LocalTransform,
     request_headers_map: &HashMap<String, String>,
     mut ops: T,
 ) -> Result<()> {
-    let env = &*ENV;
     let mut errors = Vec::new();
 
     //    let mut m = BTreeMap::new();
@@ -422,12 +422,12 @@ pub fn transform_request<T: TransformationOps>(
 /// On body parsing as json error, we return error immediately so we can send a
 /// 400 response back
 pub fn transform_response<T: TransformationOps>(
+    env: &Environment<'static>,
     transform: &LocalTransform,
     request_headers_map: &HashMap<String, String>,
     response_headers_map: &HashMap<String, String>,
     mut ops: T,
 ) -> Result<()> {
-    let env = &*ENV;
     let mut errors = Vec::new();
 
     let mut m = BTreeMap::new();

@@ -730,6 +730,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "base64",
+ "memchr",
  "minijinja",
  "once_cell",
  "rand",
