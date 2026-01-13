@@ -125,6 +125,7 @@ impl FilterConfig {
     /// filter_config is the filter config from the Envoy config here:
     /// https://www.envoyproxy.io/docs/envoy/latest/api-v3/extensions/dynamic_modules/v3/dynamic_modules.proto#envoy-v3-api-msg-extensions-dynamic-modules-v3-dynamicmoduleconfig
     pub fn new(filter_config: &str) -> Option<Self> {
+        println!("new filter_config: {}", filter_config);
         let config: LocalTransformationConfig = match serde_json::from_str(filter_config) {
             Ok(cfg) => cfg,
             Err(err) => {
@@ -170,6 +171,13 @@ pub struct Filter {
 }
 
 impl Filter {
+    fn get_env(&self) -> &Environment<'static> {
+        match self.get_per_route_config() {
+            Some(config) => &config.env,
+            None => &self.filter_config.env,
+        }
+    }
+
     fn set_per_route_config<EHF: EnvoyHttpFilter>(&mut self, envoy_filter: &mut EHF) {
         if self.per_route_config.is_none() {
             if let Some(per_route_config) = envoy_filter.get_most_specific_route_config().as_ref() {
@@ -261,7 +269,7 @@ impl Filter {
     fn transform_request<EHF: EnvoyHttpFilter>(&self, envoy_filter: &mut EHF) -> bool {
         if let Some(transform) = self.get_request_transform() {
             match transformations::jinja::transform_request(
-                &self.filter_config.env,
+                self.get_env(),
                 transform,
                 self.get_request_headers_map(),
                 EnvoyTransformationOps::new(envoy_filter),
@@ -295,7 +303,7 @@ impl Filter {
             let response_headers_map = self.create_headers_map(envoy_filter.get_response_headers());
 
             match transformations::jinja::transform_response(
-                &self.filter_config.env,
+                self.get_env(),
                 transform,
                 self.get_request_headers_map(),
                 &response_headers_map,

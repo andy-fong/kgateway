@@ -580,25 +580,51 @@ pub fn compile_templates(config: &LocalTransformationConfig) -> Result<Environme
     let mut env = new_jinja_env();
     if let Some(request) = &config.request {
         for pair in &request.add {
+            if pair.value.is_empty() {
+                continue;
+            } 
+            println!("request add: {}", pair.value);
             env.add_template_owned(pair.value.clone(), pair.value.clone())?;
         }
         for pair in &request.set {
+            if pair.value.is_empty() {
+                continue;
+            } 
+            println!("request set: {}", pair.value);
             env.add_template_owned(pair.value.clone(), pair.value.clone())?;
         }
         if let Some(body) = &request.body {
-            env.add_template_owned(body.value.clone(), body.value.clone())?;
+            if !body.value.is_empty() {
+                println!("request body: {}", body.value);
+                env.add_template_owned(body.value.clone(), body.value.clone())?;
+            }
         }
+    } else {
+        println!("no request transforms");
     }
     if let Some(response) = &config.response {
         for pair in &response.add {
+            if pair.value.is_empty() {
+                continue;
+            } 
+            println!("response add: {}", pair.value);
             env.add_template_owned(pair.value.clone(), pair.value.clone())?;
         }
         for pair in &response.set {
+            if pair.value.is_empty() {
+                continue;
+            } 
+            println!("response set: {}", pair.value);
             env.add_template_owned(pair.value.clone(), pair.value.clone())?;
         }
         if let Some(body) = &response.body {
-            env.add_template_owned(body.value.clone(), body.value.clone())?;
+            if !body.value.is_empty() {
+                println!("response body: {}", body.value);
+                env.add_template_owned(body.value.clone(), body.value.clone())?;
+            } 
         }
+    } else {
+        println!("no response transforms");
     }
     Ok(env)
 }
