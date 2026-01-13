@@ -125,7 +125,7 @@ impl FilterConfig {
     /// filter_config is the filter config from the Envoy config here:
     /// https://www.envoyproxy.io/docs/envoy/latest/api-v3/extensions/dynamic_modules/v3/dynamic_modules.proto#envoy-v3-api-msg-extensions-dynamic-modules-v3-dynamicmoduleconfig
     pub fn new(filter_config: &str) -> Option<Self> {
-        let mut config: LocalTransformationConfig = match serde_json::from_str(filter_config) {
+        let config: LocalTransformationConfig = match serde_json::from_str(filter_config) {
             Ok(cfg) => cfg,
             Err(err) => {
                 // Dont panic if there is incorrect configuration
@@ -134,7 +134,7 @@ impl FilterConfig {
             }
         };
 
-        let env = match config.compile_templates() {
+        let env = match transformations::jinja::compile_templates(&config) {
             Ok(env) => env,
             Err(err) => {
                 envoy_log_error!("error compiling templates: {err}");

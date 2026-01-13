@@ -1,5 +1,6 @@
 use crate::BodyParseBehavior;
 use crate::LocalTransform;
+use crate::LocalTransformationConfig;
 use crate::NameValuePair;
 use crate::TransformationError;
 use crate::TransformationOps;
@@ -573,4 +574,31 @@ pub fn transform_response<T: TransformationOps>(
     }
 
     combine_errors("transform_response()", errors)
+}
+
+pub fn compile_templates(config: &LocalTransformationConfig) -> Result<Environment<'static>> {
+    let mut env = new_jinja_env();
+    if let Some(request) = &config.request {
+        for pair in &request.add {
+            env.add_template(&pair.value, &pair.value)?;
+        }
+        for pair in &request.set {
+            env.add_template(&pair.value, &pair.value)?;
+        }
+        if let Some(body) = &request.body {
+            env.add_template(&body.value, &body.value)?;
+        }
+    }
+    if let Some(response) = &config.response {
+        for pair in &response.add {
+            env.add_template(&pair.value, &pair.value)?;
+        }
+        for pair in &response.set {
+            env.add_template(&pair.value, &pair.value)?;
+        }
+        if let Some(body) = &response.body {
+            env.add_template(&body.value, &body.value)?;
+        }
+    }
+    Ok(env)
 }

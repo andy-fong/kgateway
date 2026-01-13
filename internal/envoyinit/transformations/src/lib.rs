@@ -6,7 +6,6 @@ will make the linter unhappy. :w
 */
 
 use anyhow::Result;
-use minijinja::Environment;
 use serde::Deserialize;
 use serde_json::Value as JsonValue;
 
@@ -18,35 +17,6 @@ pub struct LocalTransformationConfig {
     pub request: Option<LocalTransform>,
     #[serde(default)]
     pub response: Option<LocalTransform>,
-}
-
-impl LocalTransformationConfig {
-    pub fn compile_templates(&mut self) -> Result<Environment> {
-        let env = jinja::new_jinja_env();
-        if let Some(request) = &self.request {
-            for pair in &request.add {
-                env.template_from_str(&pair.value)?;
-            }
-            for pair in &request.set {
-                env.template_from_str(&pair.value)?;
-            }
-            if let Some(body) = &request.body {
-                env.template_from_str(&body.value)?;
-            }
-        }
-        if let Some(response) = &self.response {
-            for pair in &response.add {
-                env.template_from_str(&pair.value)?;
-            }
-            for pair in &response.set {
-                env.template_from_str(&pair.value)?;
-            }
-            if let Some(body) = &response.body {
-                env.template_from_str(&body.value)?;
-            }
-        }
-        Ok(env)
-    }
 }
 
 #[derive(Default, Clone, Deserialize)]
