@@ -580,24 +580,24 @@ pub fn compile_templates(config: &LocalTransformationConfig) -> Result<Environme
     let mut env = new_jinja_env();
     if let Some(request) = &config.request {
         for pair in &request.add {
-            env.add_template(&pair.value, &pair.value)?;
+            env.add_template_owned(pair.value.clone(), pair.value.clone())?;
         }
         for pair in &request.set {
-            env.add_template(&pair.value, &pair.value)?;
+            env.add_template_owned(pair.value.clone(), pair.value.clone())?;
         }
         if let Some(body) = &request.body {
-            env.add_template(&body.value, &body.value)?;
+            env.add_template_owned(body.value.clone(), body.value.clone())?;
         }
     }
     if let Some(response) = &config.response {
         for pair in &response.add {
-            env.add_template(&pair.value, &pair.value)?;
+            env.add_template_owned(pair.value.clone(), pair.value.clone())?;
         }
         for pair in &response.set {
-            env.add_template(&pair.value, &pair.value)?;
+            env.add_template_owned(pair.value.clone(), pair.value.clone())?;
         }
         if let Some(body) = &response.body {
-            env.add_template(&body.value, &body.value)?;
+            env.add_template_owned(body.value.clone(), body.value.clone())?;
         }
     }
     Ok(env)
