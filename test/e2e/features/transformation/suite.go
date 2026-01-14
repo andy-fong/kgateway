@@ -193,8 +193,8 @@ func selectCommonTestCases(indices ...int) []transformationTestCase {
 					// "x-space-test": " foobar ",
 					// The http-bin response has "*" and we added "foo.com" in the policy. The library combined
 					// them with a ','
-					// REMOVE-ENVOY-1.37 : after upgrading to envoy 1.37, re-enable this test
-					// arm build doesn't support add_header yet
+
+					// REMOVE-ENVOY-1.37: Add header is no-op for arm build, so comment this out for now until after we upgrade to ENVOY-1.37
 					// "access-control-allow-origin": "*,foo.com",
 				},
 				NotHeaders: []string{
@@ -208,8 +208,8 @@ func selectCommonTestCases(indices ...int) []transformationTestCase {
 					// There should be a space at the beginning and end but
 					// there might be a side effect from the echo server where the header values are trimmed
 					"x-space-test": "foobar",
-					// REMOVE-ENVOY-1.37 : after upgrading to envoy 1.37, re-enable this test
-					// arm build doesn't support add_header yet
+
+					// REMOVE-ENVOY-1.37: Add header is no-op for arm build, so comment this out for now until after we upgrade to ENVOY-1.37
 					// "cookie":       []string{"foo=bar", "test=123"},
 				},
 				NotHeaders: []string{
@@ -236,8 +236,7 @@ func selectCommonTestCases(indices ...int) []transformationTestCase {
 				// go-httpbin doesn't allow setting custom response header, so make sure
 				// we get one of the default access-control header and removed the other
 				Headers: map[string]any{
-					// REMOVE-ENVOY-1.37 : after upgrading to envoy 1.37, re-enable this test
-					// arm build doesn't support add_header yet
+					// REMOVE-ENVOY-1.37: Add header is no-op for arm build, so comment this out for now until after we upgrade to ENVOY-1.37
 					// "access-control-allow-origin": "*,foo.com",
 				},
 				NotHeaders: []string{
