@@ -67,8 +67,6 @@ pub struct NameValuePair {
     pub name: String,
     #[serde(default)]
     pub value: String,
-    #[serde(skip)]
-    pub tmpl: minijinja::Template<'static>,
 }
 
 #[derive(Default, Clone, Deserialize)]
