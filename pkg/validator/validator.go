@@ -14,6 +14,9 @@ var (
 	defaultEnvoyPath = "/usr/local/bin/envoy"
 	// TODO(tim): avoid hardcoding the envoy image version in multiple places.
 	//	defaultEnvoyImage = "quay.io/solo-io/envoy-gloo:1.36.4-patch1"
+        // TODO(andy): this can be a chicken and an egg problem if we need a fix in the rustformation module to 
+        //             fix the validation test. An example is this PR: https://github.com/kgateway-dev/kgateway/pull/13289
+        //             Need to update the image here once that's merged and built
 	defaultEnvoyImage = "ghcr.io/kgateway-dev/envoy-wrapper:v2.2.0-beta.4"
 )
 
