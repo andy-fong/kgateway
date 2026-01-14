@@ -316,7 +316,7 @@ func mergeRustformation(
 				}
 				anyMsg, err = utils.JsonToAny(p1Json)
 			} else {
-				err = mergeRustformationJsonInPlace(p2Json, p2Json)
+				err = mergeRustformationJsonInPlace(p2Json, p1Json)
 				if err != nil {
 					logger.Error("failed to merge json", "error", err.Error())
 					return

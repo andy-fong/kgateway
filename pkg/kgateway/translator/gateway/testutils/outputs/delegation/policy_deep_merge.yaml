@@ -92,7 +92,7 @@ Routes:
             name: rust_module
           filterConfig:
             '@type': type.googleapis.com/google.protobuf.StringValue
-            value: '{"response":{"add":[{"name":"source","value":"example"},{"name":"source","value":"a"}]}}'
+            value: '{"response":{"add":[{"name":"source","value":"a"},{"name":"source","value":"example"}]}}'
           perRouteConfigName: http_simple_mutations
     - match:
         pathSeparatedPrefix: /a/2
@@ -108,9 +108,12 @@ Routes:
       typedPerFilterConfig:
         dynamic_modules/simple_mutations:
           '@type': type.googleapis.com/envoy.extensions.filters.http.dynamic_modules.v3.DynamicModuleFilterPerRoute
+          dynamicModuleConfig:
+            name: rust_module
           filterConfig:
             '@type': type.googleapis.com/google.protobuf.StringValue
             value: '{"response":{"add":[{"name":"source","value":"example"}]}}'
+          perRouteConfigName: http_simple_mutations
   - domains:
     - foo.com
     name: listener~80~foo_com
@@ -134,7 +137,7 @@ Routes:
             name: rust_module
           filterConfig:
             '@type': type.googleapis.com/google.protobuf.StringValue
-            value: '{"response":{"add":[{"name":"source","value":"b"},{"name":"source","value":"foo"}]}}'
+            value: '{"response":{"add":[{"name":"source","value":"foo"},{"name":"source","value":"b"}]}}'
           perRouteConfigName: http_simple_mutations
     - match:
         pathSeparatedPrefix: /b/2
@@ -150,9 +153,12 @@ Routes:
       typedPerFilterConfig:
         dynamic_modules/simple_mutations:
           '@type': type.googleapis.com/envoy.extensions.filters.http.dynamic_modules.v3.DynamicModuleFilterPerRoute
+          dynamicModuleConfig:
+            name: rust_module
           filterConfig:
             '@type': type.googleapis.com/google.protobuf.StringValue
             value: '{"response":{"add":[{"name":"source","value":"foo"}]}}'
+          perRouteConfigName: http_simple_mutations
 Statuses:
   gateways:
     infra/example-gateway:
