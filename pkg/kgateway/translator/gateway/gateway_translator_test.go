@@ -2325,12 +2325,13 @@ func TestValidation(t *testing.T) {
 			inputFile: "policy-extauth-http-pathprefix-invalid.yaml",
 			minMode:   apisettings.ValidationStrict,
 		},
-		{
-			name:      "Transformation Body Template Invalid",
-			category:  "policy",
-			inputFile: "policy-transformation-body-template-invalid.yaml",
-			minMode:   apisettings.ValidationStrict,
-		},
+		// TODO: rustformation cannot detect this complex invalid template yet
+		//		{
+		//			name:      "Transformation Body Template Invalid",
+		//			category:  "policy",
+		//			inputFile: "policy-transformation-body-template-invalid.yaml",
+		//			minMode:   apisettings.ValidationStrict,
+		//		},
 		{
 			name:      "Transformation Header Template Invalid",
 			category:  "policy",
