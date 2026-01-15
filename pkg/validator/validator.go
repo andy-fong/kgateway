@@ -14,10 +14,10 @@ var (
 	defaultEnvoyPath = "/usr/local/bin/envoy"
 	// TODO(tim): avoid hardcoding the envoy image version in multiple places.
 	//	defaultEnvoyImage = "quay.io/solo-io/envoy-gloo:1.36.4-patch1"
-        // TODO(andy): this can be a chicken and an egg problem if we need a fix in the rustformation module to 
-        //             fix the validation test. An example is this PR: https://github.com/kgateway-dev/kgateway/pull/13289
-        //             Need to update the image here once that's merged and built
-	defaultEnvoyImage = "ghcr.io/kgateway-dev/envoy-wrapper:v2.2.0-beta.4"
+	// TODO(andy): this can be a chicken and an egg problem if we need a fix in the rustformation module to
+	//             fix the validation test. An example is this PR: https://github.com/kgateway-dev/kgateway/pull/13289
+	//             Need to update the image here once that's merged and built
+	defaultEnvoyImage = "ghcr.io/kgateway-dev/envoy-wrapper:local"
 )
 
 // ErrInvalidXDS is returned when Envoy rejects the supplied JSON.
@@ -85,7 +85,7 @@ func (d *dockerValidator) Validate(ctx context.Context, json string) error {
 		"docker", "run",
 		"--rm",
 		"-i",
-		"--platform", "linux/amd64",
+		//		"--platform", "linux/amd64",
 		//		"-e", "ENVOY_DYNAMIC_MODULES_SEARCH_PATH=/usr/local/lib",
 		"--entrypoint", "/usr/local/bin/envoy",
 		d.img,
@@ -95,11 +95,14 @@ func (d *dockerValidator) Validate(ctx context.Context, json string) error {
 		"-l", "critical",
 		"--log-format", "%v",
 	)
+	//	fmt.Printf("json:\n%s\n", json)
 	cmd.Stdin = strings.NewReader(json)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 
+	//	fmt.Printf("stdout:\n%s\n", &stdout)
+	//	fmt.Printf("stderr:\n%s\n", &stderr)
 	err := cmd.Run()
 	if err == nil {
 		return nil
