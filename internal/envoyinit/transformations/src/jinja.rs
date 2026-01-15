@@ -214,7 +214,6 @@ fn render(
     ctx: &minijinja::Value,
     template_key: &str,
     template: &str,
-    parsed_body_as_json: bool,
 ) -> Result<String> {
     if template.is_empty() {
         return Ok(String::new());
@@ -222,30 +221,6 @@ fn render(
     let tmpl = env
         .get_template(template_key)
         .with_context(|| format!("error looking up jinja template {}", template))?;
-    if !parsed_body_as_json {
-        // This is to mimic the C++ behavior when a transformation is used that needs
-        // the body is parsed as json but it's not enabled. So, we try to detect if
-        // the transformation template has any undeclared variables when parseAsJson
-        // is not turned on. Returning a TransformationError type here will cause
-        // the envoy layer code to return a local reply with 400 status code.
-        // Other errors would be logged but they are not critical to stop the request
-        let undeclared_variables = tmpl.undeclared_variables(true);
-        if !undeclared_variables.is_empty() {
-            for v in &undeclared_variables {
-                // Unfortunately, custom function is also reported as undeclared variables
-                // by minijinja, so only return error if the undeclared variables are not
-                // custom functions. GLOBALS_LOCKUP is lazily constructed once and is
-                // static throughout the lifetime of the process.
-                if !GLOBALS_LOOKUP.contains(v.as_str()) {
-                    return Err(TransformationError::UndeclaredJsonVariables(format!(
-                        "{:?} from template {}",
-                        undeclared_variables, template
-                    ))
-                    .into());
-                }
-            }
-        }
-    }
     tmpl.render(ctx)
         .with_context(|| format!("error rendering jinja template {}", template))
 }
@@ -296,7 +271,6 @@ pub fn transform_request<T: TransformationOps>(
         STATE_LOOKUP_KEY_REQ_HEADERS.to_string(),
         minijinja::Value::from_serialize(request_headers_map),
     );
-    let mut parsed_body_as_json = false;
     if let Some(body_transform) = transform.body.as_ref() {
         if matches!(body_transform.parse_as, BodyParseBehavior::AsJson) {
             let json_body = ops.parse_request_json_body()?;
@@ -314,8 +288,6 @@ pub fn transform_request<T: TransformationOps>(
                         m.insert(k, minijinja::Value::from_serialize(&v));
                     }
                 }
-
-                parsed_body_as_json = true;
             }
         }
     }
@@ -340,7 +312,6 @@ pub fn transform_request<T: TransformationOps>(
                 &ctx,
                 REQUEST_BODY_TEMPLATE_LOOKUP_KEY,
                 &body_transform.value,
-                parsed_body_as_json,
             ) {
                 Ok(str) => Some(str),
                 Err(e) => {
@@ -373,7 +344,7 @@ pub fn transform_request<T: TransformationOps>(
             ops.remove_request_header(key);
             continue;
         }
-        let rendered = match render(env, &ctx, value, value, parsed_body_as_json) {
+        let rendered = match render(env, &ctx, value, value) {
             Ok(str) => Some(str),
             Err(err) => {
                 if let Some(e) = err.downcast_ref::<TransformationError>() {
@@ -403,7 +374,7 @@ pub fn transform_request<T: TransformationOps>(
         if value.is_empty() {
             continue;
         }
-        let rendered = match render(env, &ctx, value, value, parsed_body_as_json) {
+        let rendered = match render(env, &ctx, value, value) {
             Ok(str) => Some(str),
             Err(err) => {
                 if let Some(e) = err.downcast_ref::<TransformationError>() {
@@ -460,7 +431,6 @@ pub fn transform_response<T: TransformationOps>(
         STATE_LOOKUP_KEY_REQ_HEADERS.to_string(),
         minijinja::Value::from_serialize(request_headers_map),
     );
-    let mut parsed_body_as_json = false;
     if let Some(body_transform) = transform.body.as_ref() {
         if matches!(body_transform.parse_as, BodyParseBehavior::AsJson) {
             let json_body = ops.parse_response_json_body()?;
@@ -478,7 +448,6 @@ pub fn transform_response<T: TransformationOps>(
                         m.insert(k, minijinja::Value::from_serialize(&v));
                     }
                 }
-                parsed_body_as_json = true;
             }
         }
     }
@@ -506,7 +475,6 @@ pub fn transform_response<T: TransformationOps>(
                 &ctx,
                 RESPONSE_BODY_TEMPLATE_LOOKUP_KEY,
                 &body_transform.value,
-                parsed_body_as_json,
             ) {
                 Ok(str) => Some(str),
                 Err(e) => {
@@ -539,7 +507,7 @@ pub fn transform_response<T: TransformationOps>(
             ops.remove_response_header(key);
             continue;
         }
-        let rendered = match render(env, &ctx, value, value, parsed_body_as_json) {
+        let rendered = match render(env, &ctx, value, value) {
             Ok(str) => Some(str),
             Err(err) => {
                 if let Some(e) = err.downcast_ref::<TransformationError>() {
@@ -569,7 +537,7 @@ pub fn transform_response<T: TransformationOps>(
         if value.is_empty() {
             continue;
         }
-        let rendered = match render(env, &ctx, value, value, parsed_body_as_json) {
+        let rendered = match render(env, &ctx, value, value) {
             Ok(str) => Some(str),
             Err(err) => {
                 if let Some(e) = err.downcast_ref::<TransformationError>() {
@@ -600,46 +568,79 @@ pub fn transform_response<T: TransformationOps>(
     combine_errors("transform_response()", errors)
 }
 
+fn add_template(
+    env: &mut Environment<'_>,
+    key: &str,
+    template: &str,
+    parsed_body_as_json: bool,
+) -> Result<()> {
+    if template.is_empty() {
+        return Ok(());
+    }
+    env.add_template_owned(key.to_string(), template.to_string())?;
+    let tmpl = env.get_template(key)?;
+    if !parsed_body_as_json {
+        // We can only check for undeclared_variables if we are not parsing the body as json
+        // because if we do parse as json, the variables from the body is not known in advance
+        // so we can check it at config time
+        let undeclared_variables = tmpl.undeclared_variables(true);
+        if !undeclared_variables.is_empty() {
+            for v in &undeclared_variables {
+                // Unfortunately, custom function is also reported as undeclared variables
+                // by minijinja, so only return error if the undeclared variables are not
+                // custom functions. GLOBALS_LOCKUP is lazily constructed once and is
+                // static throughout the lifetime of the process.
+                if !GLOBALS_LOOKUP.contains(v.as_str()) {
+                    return Err(TransformationError::UndeclaredJsonVariables(format!(
+                        "{:?} from template {}",
+                        undeclared_variables, template
+                    ))
+                    .into());
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
 pub fn create_env_with_templates(
     config: &LocalTransformationConfig,
 ) -> Result<Environment<'static>> {
     let mut env = new_jinja_env();
     if let Some(request) = &config.request {
+        let mut parse_body_as_json = false;
+        if let Some(body) = &request.body {
+            parse_body_as_json = matches!(body.parse_as, BodyParseBehavior::AsJson);
+            add_template(
+                &mut env,
+                REQUEST_BODY_TEMPLATE_LOOKUP_KEY,
+                &body.value,
+                parse_body_as_json,
+            )?;
+        }
         for pair in &request.add {
-            if pair.value.is_empty() {
-                continue;
-            }
-            env.add_template_owned(pair.value.clone(), pair.value.clone())?;
+            add_template(&mut env, &pair.value, &pair.value, parse_body_as_json)?;
         }
         for pair in &request.set {
-            if pair.value.is_empty() {
-                continue;
-            }
-            env.add_template_owned(pair.value.clone(), pair.value.clone())?;
-        }
-        if let Some(body) = &request.body {
-            if !body.value.is_empty() {
-                env.add_template_owned(REQUEST_BODY_TEMPLATE_LOOKUP_KEY, body.value.clone())?;
-            }
+            add_template(&mut env, &pair.value, &pair.value, parse_body_as_json)?;
         }
     }
     if let Some(response) = &config.response {
+        let mut parse_body_as_json = false;
+        if let Some(body) = &response.body {
+            parse_body_as_json = matches!(body.parse_as, BodyParseBehavior::AsJson);
+            add_template(
+                &mut env,
+                RESPONSE_BODY_TEMPLATE_LOOKUP_KEY,
+                &body.value,
+                parse_body_as_json,
+            )?;
+        }
         for pair in &response.add {
-            if pair.value.is_empty() {
-                continue;
-            }
-            env.add_template_owned(pair.value.clone(), pair.value.clone())?;
+            add_template(&mut env, &pair.value, &pair.value, parse_body_as_json)?;
         }
         for pair in &response.set {
-            if pair.value.is_empty() {
-                continue;
-            }
-            env.add_template_owned(pair.value.clone(), pair.value.clone())?;
-        }
-        if let Some(body) = &response.body {
-            if !body.value.is_empty() {
-                env.add_template_owned(RESPONSE_BODY_TEMPLATE_LOOKUP_KEY, body.value.clone())?;
-            }
+            add_template(&mut env, &pair.value, &pair.value, parse_body_as_json)?;
         }
     }
     Ok(env)
