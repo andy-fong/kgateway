@@ -259,7 +259,7 @@ type (
 
 // BodyparseBehavior defines how the body should be parsed
 // If set to json and the body is not json then the filter will not perform the transformation.
-// +kubebuilder:validation:Enum=AsString;AsJson
+// +kubebuilder:validation:Enum=AsString;AsJson;None
 type BodyParseBehavior string
 
 const (
@@ -267,6 +267,8 @@ const (
 	BodyParseBehaviorAsString BodyParseBehavior = "AsString"
 	// BodyParseBehaviorAsJSON will parse the body as a json object.
 	BodyParseBehaviorAsJSON BodyParseBehavior = "AsJson"
+	// BodyParseBehaviorNone will skip any body buffering and processing.
+	BodyParseBehaviorNone BodyParseBehavior = "None"
 )
 
 // BodyTransformation controls how the body should be parsed and transformed.

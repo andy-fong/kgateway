@@ -1884,6 +1884,7 @@ spec:
                             enum:
                             - AsString
                             - AsJson
+                            - None
                             type: string
                           value:
                             description: |-
@@ -1960,6 +1961,7 @@ spec:
                             enum:
                             - AsString
                             - AsJson
+                            - None
                             type: string
                           value:
                             description: |-

@@ -18,6 +18,46 @@ pub struct FilterConfig {
     env: Environment<'static>,
 }
 
+struct EnvoyBuffersReader<'a> {
+    buffers: Vec<EnvoyMutBuffer<'a>>,
+    chunk_idx: usize,
+    offset: usize,
+}
+
+impl<'a> EnvoyBuffersReader<'a> {
+    fn new(buffers: Vec<EnvoyMutBuffer<'a>>) -> Self {
+        Self {
+            buffers,
+            chunk_idx: 0,
+            offset: 0,
+        }
+    }
+}
+
+impl std::io::Read for EnvoyBuffersReader<'_> {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        let mut filled = 0;
+        while filled < buf.len() && self.chunk_idx < self.buffers.len() {
+            let chunk = self.buffers[self.chunk_idx].as_slice();
+            let remaining = &chunk[self.offset..];
+            if remaining.is_empty() {
+                self.chunk_idx += 1;
+                self.offset = 0;
+                continue;
+            }
+            let n = remaining.len().min(buf.len() - filled);
+            buf[filled..filled + n].copy_from_slice(&remaining[..n]);
+            self.offset += n;
+            filled += n;
+            if self.offset >= chunk.len() {
+                self.chunk_idx += 1;
+                self.offset = 0;
+            }
+        }
+        Ok(filled)
+    }
+}
+
 struct EnvoyTransformationOps<'a, EHF: EnvoyHttpFilter> {
     envoy_filter: &'a mut EHF,
     used_received_request_body: Option<bool>,
@@ -45,37 +85,49 @@ impl<EHF: EnvoyHttpFilter> TransformationOps for EnvoyTransformationOps<'_, EHF>
         self.envoy_filter.remove_request_header(key)
     }
     fn parse_request_json_body(&mut self) -> Result<JsonValue> {
-        let body = self.get_request_body();
-        if body.is_empty() {
+        use std::io::Read as _;
+        let mut reader = self.get_request_body_reader();
+        let mut peek = [0u8; 1];
+        if reader.read(&mut peek)? == 0 {
             return Ok(JsonValue::Null);
         }
-        serde_json::from_slice(&body).context("failed to parse request body as json")
+        let chained = std::io::Cursor::new(peek).chain(reader);
+        serde_json::from_reader(chained).context("failed to parse request body as json")
     }
-    fn get_request_body(&mut self) -> Vec<u8> {
+    fn get_request_body_reader(&mut self) -> Box<dyn std::io::Read + '_> {
         self.used_received_request_body = Some(false);
 
-        let mut buffers = self.envoy_filter.get_buffered_request_body();
-
-        if buffers.is_none() {
-            // When the body arrives in a single chunk (common for small JSON
-            // payloads), the first on_request_body callback fires with
-            // end_of_stream=true before any prior StopIterationAndBuffer could
-            // populate the buffered body.  In that case the data is only in the
-            // "received" buffer — mirror the same fallback used for responses.
-            buffers = self.envoy_filter.get_received_request_body();
-            if buffers.is_some() {
-                self.used_received_request_body = Some(true);
-            }
+        // Check buffered first; if None, fall back to received.
+        // TODO: in envoy v1.38, there is a function received_buffered_request_body()
+        //       to check if it's buffered
+        if self.envoy_filter.get_buffered_request_body().is_some() {
+            let buffers = self.envoy_filter.get_buffered_request_body().unwrap();
+            return Box::new(EnvoyBuffersReader::new(buffers));
         }
 
-        match buffers {
-            None => Vec::default(),
+        // When the body arrives in a single chunk (common for small JSON
+        // payloads), the first on_request_body callback fires with
+        // end_of_stream=true before any prior StopIterationAndBuffer could
+        // populate the buffered body.  In that case the data is only in the
+        // "received" buffer — mirror the same fallback used for responses.
+        match self.envoy_filter.get_received_request_body() {
             Some(buffers) => {
-                // TODO: implement Reader for EnvoyBuffer and use serde_json::from_reader to avoid making copy first?
-                let chunks: Vec<_> = buffers.iter().map(|b| b.as_slice()).collect();
-                chunks.concat()
+                self.used_received_request_body = Some(true);
+                Box::new(EnvoyBuffersReader::new(buffers))
             }
+            None => Box::new(std::io::empty()),
         }
+    }
+    fn get_request_body(&mut self) -> Vec<u8> {
+        // TODO: switch to use read_whole_request_body() after upgrading to v1.38 envoy
+        let mut body = Vec::new();
+        self.get_request_body_reader()
+            .read_to_end(&mut body)
+            .unwrap_or_else(|e| {
+                envoy_log_warn!("failed to read response body: {e}");
+                0
+            });
+        body
     }
     fn drain_request_body(&mut self, number_of_bytes: usize) -> bool {
         if self.used_received_request_body.is_none() {
@@ -113,33 +165,45 @@ impl<EHF: EnvoyHttpFilter> TransformationOps for EnvoyTransformationOps<'_, EHF>
         self.envoy_filter.remove_response_header(key)
     }
     fn parse_response_json_body(&mut self) -> Result<JsonValue> {
-        let body = self.get_response_body();
-        if body.is_empty() {
+        use std::io::Read as _;
+        let mut reader = self.get_response_body_reader();
+        let mut peek = [0u8; 1];
+        if reader.read(&mut peek)? == 0 {
             return Ok(JsonValue::Null);
         }
-        serde_json::from_slice(&body).context("failed to parse response body as json")
+        let chained = std::io::Cursor::new(peek).chain(reader);
+        serde_json::from_reader(chained).context("failed to parse response body as json")
     }
-    fn get_response_body(&mut self) -> Vec<u8> {
+    fn get_response_body_reader(&mut self) -> Box<dyn std::io::Read + '_> {
         self.used_received_response_body = Some(false);
 
-        let mut buffers = self.envoy_filter.get_buffered_response_body();
-
-        if buffers.is_none() {
-            // For LocalReply, the body is in the "received_response_body"
-            buffers = self.envoy_filter.get_received_response_body();
-            if buffers.is_some() {
-                self.used_received_response_body = Some(true);
-            }
+        // Check buffered first; if None, fall back to received.
+        // TODO: in envoy v1.38, there is a function received_buffered_response_body()
+        //       to check if it's buffered
+        if self.envoy_filter.get_buffered_response_body().is_some() {
+            let buffers = self.envoy_filter.get_buffered_response_body().unwrap();
+            return Box::new(EnvoyBuffersReader::new(buffers));
         }
 
-        match buffers {
-            None => Vec::default(),
+        // For LocalReply, the body is in the "received_response_body"
+        match self.envoy_filter.get_received_response_body() {
             Some(buffers) => {
-                // TODO: implement Reader for EnvoyBuffer and use serde_json::from_reader to avoid making copy first?
-                let chunks: Vec<_> = buffers.iter().map(|b| b.as_slice()).collect();
-                chunks.concat()
+                self.used_received_response_body = Some(true);
+                Box::new(EnvoyBuffersReader::new(buffers))
             }
+            None => Box::new(std::io::empty()),
         }
+    }
+    fn get_response_body(&mut self) -> Vec<u8> {
+        // TODO: switch to use read_whole_response_body() after upgrading to v1.38 envoy
+        let mut body = Vec::new();
+        self.get_response_body_reader()
+            .read_to_end(&mut body)
+            .unwrap_or_else(|e| {
+                envoy_log_warn!("failed to read response body: {e}");
+                0
+            });
+        body
     }
     fn drain_response_body(&mut self, number_of_bytes: usize) -> bool {
         // With testing, it seems to be unnecessary to detect
@@ -537,6 +601,94 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::Read;
+
+    // --- EnvoyBuffersReader unit tests ---
+
+    #[test]
+    fn test_envoy_buffers_reader_empty_buffers() {
+        let mut reader = EnvoyBuffersReader::new(vec![]);
+        let mut out = Vec::new();
+        reader.read_to_end(&mut out).unwrap();
+        assert!(out.is_empty());
+    }
+
+    #[test]
+    fn test_envoy_buffers_reader_single_chunk() {
+        static mut CHUNK: [u8; 5] = *b"hello";
+        let buffers = vec![EnvoyMutBuffer::new(unsafe { &mut CHUNK })];
+        let mut reader = EnvoyBuffersReader::new(buffers);
+        let mut out = Vec::new();
+        reader.read_to_end(&mut out).unwrap();
+        assert_eq!(out, b"hello");
+    }
+
+    #[test]
+    fn test_envoy_buffers_reader_multiple_chunks() {
+        static mut CHUNK_X: [u8; 3] = *b"foo";
+        static mut CHUNK_Y: [u8; 1] = *b"-";
+        static mut CHUNK_Z: [u8; 3] = *b"bar";
+        let buffers = vec![
+            EnvoyMutBuffer::new(unsafe { &mut CHUNK_X }),
+            EnvoyMutBuffer::new(unsafe { &mut CHUNK_Y }),
+            EnvoyMutBuffer::new(unsafe { &mut CHUNK_Z }),
+        ];
+        let mut reader = EnvoyBuffersReader::new(buffers);
+        let mut out = Vec::new();
+        reader.read_to_end(&mut out).unwrap();
+        assert_eq!(out, b"foo-bar");
+    }
+
+    #[test]
+    fn test_envoy_buffers_reader_small_read_buf() {
+        // Read buffer smaller than a single chunk — verifies partial-read and
+        // offset advancement within a chunk.
+        static mut CHUNK_X: [u8; 6] = *b"abcdef";
+        static mut CHUNK_Y: [u8; 5] = *b"ghijk";
+        let buffers = vec![
+            EnvoyMutBuffer::new(unsafe { &mut CHUNK_X }),
+            EnvoyMutBuffer::new(unsafe { &mut CHUNK_Y }),
+        ];
+        let mut reader = EnvoyBuffersReader::new(buffers);
+
+        let mut tmp = [0u8; 4];
+        let n1 = reader.read(&mut tmp).unwrap();
+        assert_eq!(n1, 4);
+        assert_eq!(&tmp[..n1], b"abcd");
+
+        // read across chunk boundary
+        let n2 = reader.read(&mut tmp).unwrap();
+        assert_eq!(n2, 4);
+        assert_eq!(&tmp[..n2], b"efgh");
+
+        // read the rest to make sure we don't read over
+        let n3 = reader.read(&mut tmp).unwrap();
+        assert_eq!(n3, 3);
+        assert_eq!(&tmp[..n3], b"ijk");
+
+        // Reader exhausted — next read returns 0.
+        let n4 = reader.read(&mut tmp).unwrap();
+        assert_eq!(n4, 0);
+    }
+
+    #[test]
+    fn test_envoy_buffers_reader_empty_chunk_skipped() {
+        static mut CHUNK_BEFORE: [u8; 3] = *b"abc";
+        static mut CHUNK_EMPTY: [u8; 0] = [];
+        static mut CHUNK_AFTER: [u8; 3] = *b"xyz";
+        let buffers = vec![
+            EnvoyMutBuffer::new(unsafe { &mut CHUNK_BEFORE }),
+            EnvoyMutBuffer::new(unsafe { &mut CHUNK_EMPTY }),
+            EnvoyMutBuffer::new(unsafe { &mut CHUNK_AFTER }),
+        ];
+        let mut reader = EnvoyBuffersReader::new(buffers);
+        let mut out = Vec::new();
+        reader.read_to_end(&mut out).unwrap();
+        assert_eq!(out, b"abcxyz");
+    }
+
+    // --- end EnvoyBuffersReader unit tests ---
+
     #[test]
     fn test_injected_functions() {
         // get envoy's mockall impl for httpfilter

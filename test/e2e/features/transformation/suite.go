@@ -687,6 +687,24 @@ func selectCommonTestCases(indices ...int) []transformationTestCase {
 				},
 			},
 		},
+		{
+			// test 20
+			// Send a large JSON body with a "model" field at the end and verify it gets extracted into a header.
+			name:      "model-field-extracted-from-large-json-body",
+			routeName: "route-for-model-extraction",
+			opts: []curl.Option{
+				curl.WithPostBody(fmt.Sprintf(`{"messages": [{"role": "user", "content": "%s"}], "model": "gpt-4"}`,
+					strings.Repeat("a", 100*1024))),
+			},
+			resp: &testmatchers.HttpResponse{
+				StatusCode: http.StatusOK,
+			},
+			req: &testmatchers.HttpRequest{
+				Headers: map[string]any{
+					"Body-Extracted-Model": "gpt-4",
+				},
+			},
+		},
 	}
 
 	// If no indices are provided, return the full original slice.
