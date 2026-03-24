@@ -38,6 +38,13 @@ impl LocalTransform {
             && self.remove.is_empty()
             && self.body.as_ref().map(|c| c.is_empty()).unwrap_or(true)
     }
+
+    pub fn skip_buffering(&self) -> bool {
+        self.body
+            .as_ref()
+            .map(|c| c.skip_parsing())
+            .unwrap_or(false)
+    }
 }
 
 #[derive(Default, Clone, Deserialize)]
@@ -61,6 +68,13 @@ impl BodyTransform {
         }
         false
     }
+
+    pub fn skip_parsing(&self) -> bool {
+        if matches!(self.parse_as, BodyParseBehavior::None) {
+            return true;
+        }
+        false
+    }
 }
 #[derive(Default, Clone, Deserialize)]
 pub struct NameValuePair {
@@ -74,6 +88,7 @@ pub enum BodyParseBehavior {
     #[default]
     AsString,
     AsJson,
+    None,
 }
 
 pub trait TransformationOps {
