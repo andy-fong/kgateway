@@ -14,8 +14,9 @@ import (
 // the upgrade) are detected quickly.
 //
 // After a successful handshake it sends a short test message and returns the
-// echoed response. This works with echo-style WebSocket servers (like
-// jmalloc/echo-server) that only reply after receiving a client message.
+// echoed response. jmalloc/echo-server sends a greeting frame on connect
+// ("Request served by ..."), so this function reads (and discards) the greeting
+// before sending the test payload.
 func Dial(url, host string, deadline time.Duration, extraHeaders http.Header) (string, error) {
 	dialer := gorillaws.Dialer{
 		HandshakeTimeout: deadline,
@@ -34,7 +35,14 @@ func Dial(url, host string, deadline time.Duration, extraHeaders http.Header) (s
 	}
 	defer conn.Close()
 
-	// Echo servers don't send a greeting — send a message first.
+	// Read and discard the server greeting frame (e.g. "Request served by <pod>").
+	conn.SetReadDeadline(time.Now().Add(deadline)) //nolint:errcheck
+	_, _, err = conn.ReadMessage()
+	if err != nil {
+		return "", fmt.Errorf("websocket read greeting failed: %w", err)
+	}
+
+	// Send a test payload and read the echo.
 	const testPayload = "websocket-e2e-ping"
 	conn.SetWriteDeadline(time.Now().Add(deadline)) //nolint:errcheck
 	if err := conn.WriteMessage(gorillaws.TextMessage, []byte(testPayload)); err != nil {

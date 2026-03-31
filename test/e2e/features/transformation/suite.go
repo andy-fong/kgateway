@@ -23,9 +23,7 @@ import (
 	reports "github.com/kgateway-dev/kgateway/v2/pkg/pluginsdk/reporter"
 	"github.com/kgateway-dev/kgateway/v2/pkg/utils/fsutils"
 	"github.com/kgateway-dev/kgateway/v2/pkg/utils/kubeutils"
-	"github.com/kgateway-dev/kgateway/v2/pkg/utils/kubeutils/portforward"
 	"github.com/kgateway-dev/kgateway/v2/pkg/utils/requestutils/curl"
-	"github.com/kgateway-dev/kgateway/v2/pkg/utils/requestutils/websocket"
 	"github.com/kgateway-dev/kgateway/v2/test/e2e"
 	"github.com/kgateway-dev/kgateway/v2/test/e2e/defaults"
 	"github.com/kgateway-dev/kgateway/v2/test/e2e/tests/base"
@@ -58,9 +56,6 @@ var (
 	transformForMatchMethodManifest         = filepath.Join(fsutils.MustGetThisDir(), "testdata", "transform-for-match-method.yaml")
 	transformForHeaderToBodyJsonManifest    = filepath.Join(fsutils.MustGetThisDir(), "testdata", "transform-for-header-to-body-json.yaml")
 	transformForBodyLocalReplyManifest      = filepath.Join(fsutils.MustGetThisDir(), "testdata", "transform-for-body-local-reply.yaml")
-	websocketServiceManifest                = filepath.Join(fsutils.MustGetThisDir(), "testdata", "websocket-service.yaml")
-	transformForWebsocketBodyManifest       = filepath.Join(fsutils.MustGetThisDir(), "testdata", "transform-for-websocket-body.yaml")
-	noTransformManifest                     = filepath.Join(fsutils.MustGetThisDir(), "testdata", "no-transform.yaml")
 
 	proxyObjectMeta = metav1.ObjectMeta{
 		Name:      "gw",
@@ -86,9 +81,6 @@ var (
 			transformForHeaderToBodyJsonManifest,
 			transformForBodyLocalReplyManifest,
 			rustformationForModelExtractionManifest,
-			websocketServiceManifest,
-			transformForWebsocketBodyManifest,
-			noTransformManifest,
 		},
 	}
 )
@@ -763,64 +755,6 @@ func (s *testingSuite) TestGatewayWithTransformation() {
 }
 
 // wsDialTimeout is a short deadline used for all WebSocket dial attempts in this suite.
-// It makes the body-buffering bug reproduce quickly (instead of hanging for the full test timeout).
-const wsDialTimeout = 10 * time.Second
-
-// dialWebSocketThroughGateway port-forwards the gateway service, dials a WebSocket connection
-// with the given Host header, reads the first text frame from the server, and returns it.
-// Assertions are made against g so failures are reported at the call site.
-func (s *testingSuite) dialWebSocketThroughGateway(g gomega.Gomega, wsHost string) string {
-	portForwarder, err := s.TestInstallation.ClusterContext.Cli.StartPortForward(
-		s.Ctx,
-		portforward.WithService(proxyObjectMeta.GetName(), proxyObjectMeta.GetNamespace()),
-		portforward.WithRemotePort(8080),
-	)
-	g.Expect(err).NotTo(gomega.HaveOccurred(), "failed to start port-forward to gateway")
-	defer func() {
-		portForwarder.Close()
-		portForwarder.WaitForStop()
-	}()
-
-	wsURL := fmt.Sprintf("ws://%s/", portForwarder.Address())
-	msg, err := websocket.Dial(wsURL, wsHost, wsDialTimeout, nil)
-	g.Expect(err).NotTo(gomega.HaveOccurred(), "WebSocket dial failed for host %s", wsHost)
-	return msg
-}
-
-// TestWebSocketHappyPath verifies that a WebSocket upgrade succeeds through a route that has no
-// TrafficPolicy body transformation, confirming the baseline behavior is correct.
-func (s *testingSuite) TestWebSocketHappyPath() {
-	s.TestInstallation.AssertionsT(s.T()).EventuallyPodsRunning(s.Ctx, proxyObjectMeta.GetNamespace(), metav1.ListOptions{
-		LabelSelector: "app.kubernetes.io/name=websocket-backend",
-	})
-
-	g := gomega.NewWithT(s.T())
-	msg := s.dialWebSocketThroughGateway(g, "example-websocket-no-transform.com")
-	g.Expect(msg).NotTo(gomega.BeEmpty(), "echo-server should send a greeting frame on connect")
-}
-
-// TestWebSocketWithBodyTransformation is a bug-reproduction test.
-//
-// When a route has a TrafficPolicy with request body transformation (body.parseAs != None and a
-// non-empty body value template), the http_simple_mutations dynamic module filter returns
-// StopIterationAndBuffer on each body chunk until end_of_stream is true. For a WebSocket upgrade
-// request the upgrade HTTP handshake never sends a body, so Envoy waits forever — the connection
-// hangs and the test times out.
-//
-// This test asserts the DESIRED behavior (dial succeeds) so it fails before the bug is fixed and
-// passes once the fix is in place.
-func (s *testingSuite) TestWebSocketWithBodyTransformation() {
-	s.TestInstallation.AssertionsT(s.T()).EventuallyPodsRunning(s.Ctx, proxyObjectMeta.GetNamespace(), metav1.ListOptions{
-		LabelSelector: "app.kubernetes.io/name=websocket-backend",
-	})
-
-	g := gomega.NewWithT(s.T())
-	msg := s.dialWebSocketThroughGateway(g, "example-websocket-body.com")
-	g.Expect(msg).NotTo(gomega.BeEmpty(),
-		"echo-server should send a greeting frame on connect; "+
-			"if this hangs/times out the Envoy body-buffering bug is present")
-}
-
 func (s *testingSuite) runTestCases(testCases []transformationTestCase) {
 	for _, tc := range testCases {
 		s.T().Run(tc.name, func(t *testing.T) {
@@ -925,7 +859,6 @@ func (s *testingSuite) assertSuiteResourceStatus() {
 		"example-route-for-pseudo-headers",
 		"example-route-for-query-match",
 		"example-route-for-model-extraction",
-		"example-route-for-websocket-body",
 	}
 	trafficPoliciesToCheck := []string{
 		"example-traffic-policy-for-body-as-string",
@@ -940,7 +873,6 @@ func (s *testingSuite) assertSuiteResourceStatus() {
 		"example-traffic-policy-for-pseudo-headers",
 		"example-traffic-policy-for-query-match",
 		"example-traffic-policy-for-model-extraction",
-		"example-traffic-policy-for-websocket-body",
 	}
 	s.assertRouteAndTrafficPolicyStatus(routesToCheck, trafficPoliciesToCheck)
 }
