@@ -1,0 +1,46 @@
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: example-route-for-websocket-body
+spec:
+  parentRefs:
+    - name: gw
+  hostnames:
+    - "example-websocket-body.com"
+  rules:
+    - backendRefs:
+        - name: websocket-svc
+          port: 8080
+---
+# TrafficPolicy with request body transformation. Setting body.parseAs triggers buffering in
+# Envoy's http_simple_mutations dynamic module filter. This causes WebSocket upgrade requests
+# to hang because Envoy waits for a complete request body before proceeding, but the WebSocket
+# upgrade request never sends a body — it switches protocols immediately.
+apiVersion: gateway.kgateway.dev/v1alpha1
+kind: TrafficPolicy
+metadata:
+  name: example-traffic-policy-for-websocket-body
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      name: example-route-for-websocket-body
+  transformation:
+    request:
+      body:
+        parseAs: AsString
+        value: "{{body()}}"
+---
+# HTTPListenerPolicy to enable WebSocket upgrades on the gateway listener.
+apiVersion: gateway.kgateway.dev/v1alpha1
+kind: HTTPListenerPolicy
+metadata:
+  name: websocket-upgrade-policy
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: gw
+  upgradeConfig:
+    enabledUpgrades:
+      - "websocket"

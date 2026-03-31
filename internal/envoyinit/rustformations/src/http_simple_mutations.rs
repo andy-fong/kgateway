@@ -526,7 +526,7 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
         }
 
         if !end_of_stream {
-            let transform = self.get_request_transform().unwrap();
+            let transform = self.get_request_transform().as_ref().unwrap();
             if transform.skip_buffering() {
                 envoy_log_trace!("on_request_body skipped buffering");
                 return abi::envoy_dynamic_module_type_on_http_filter_request_body_status::Continue;
