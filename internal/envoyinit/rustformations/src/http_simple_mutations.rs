@@ -520,17 +520,20 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
         end_of_stream: bool,
     ) -> abi::envoy_dynamic_module_type_on_http_filter_request_body_status {
         self.set_per_route_config(envoy_filter);
-        if !self.has_request_transform() {
+        let Some(transform) = self.get_request_transform() else {
             envoy_log_trace!("on_request_body skipping");
+            return abi::envoy_dynamic_module_type_on_http_filter_request_body_status::Continue;
+        };
+        if transform.is_empty() {
+            envoy_log_trace!("on_request_body skipping");
+            return abi::envoy_dynamic_module_type_on_http_filter_request_body_status::Continue;
+        }
+        if transform.skip_buffering() {
+            envoy_log_trace!("on_request_body skipped buffering");
             return abi::envoy_dynamic_module_type_on_http_filter_request_body_status::Continue;
         }
 
         if !end_of_stream {
-            let transform = self.get_request_transform().as_ref().unwrap();
-            if transform.skip_buffering() {
-                envoy_log_trace!("on_request_body skipped buffering");
-                return abi::envoy_dynamic_module_type_on_http_filter_request_body_status::Continue;
-            }
             envoy_log_trace!("on_request_body buffering");
             // This is mimicking the C++ transformation filter behavior to always buffer the request body by
             // default unless passthrough is set but kgateway doesn't support body passthrough in
@@ -560,7 +563,12 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
             return abi::envoy_dynamic_module_type_on_http_filter_response_headers_status::Continue;
         }
 
-        if !end_of_stream {
+        if !end_of_stream
+            && self
+                .get_response_transform()
+                .as_ref()
+                .is_some_and(|t| !t.skip_buffering())
+        {
             envoy_log_trace!("on_response_headers buffering");
             return abi::envoy_dynamic_module_type_on_http_filter_response_headers_status::StopIteration;
         }
@@ -581,10 +589,19 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
         end_of_stream: bool,
     ) -> abi::envoy_dynamic_module_type_on_http_filter_response_body_status {
         self.set_per_route_config(envoy_filter);
-        if !self.has_response_transform() {
+        let Some(transform) = self.get_response_transform() else {
+            envoy_log_trace!("on_response_body skipping");
+            return abi::envoy_dynamic_module_type_on_http_filter_response_body_status::Continue;
+        };
+        if transform.is_empty() {
             envoy_log_trace!("on_response_body skipping");
             return abi::envoy_dynamic_module_type_on_http_filter_response_body_status::Continue;
         }
+        if transform.skip_buffering() {
+            envoy_log_trace!("on_response_body skipped buffering");
+            return abi::envoy_dynamic_module_type_on_http_filter_response_body_status::Continue;
+        }
+
         if !end_of_stream {
             envoy_log_trace!("on_response_body buffering");
             // This is mimicking the C++ transformation filter behavior to always buffer the response body by

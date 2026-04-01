@@ -30,6 +30,14 @@ spec:
       name: websocket-body-transform-route
   transformation:
     request:
-      body:
-        parseAs: AsString
-        value: "{{body()}}"
+      set:
+        - name: x-foo-request
+          value: "bar"
+    #      body:
+    #        parseAs: None
+    response:
+      set:
+        - name: x-foo-response
+          value: "bar"
+#      body:
+#        parseAs: None
