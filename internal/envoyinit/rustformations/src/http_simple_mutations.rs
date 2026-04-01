@@ -286,6 +286,7 @@ impl<EHF: EnvoyHttpFilter> HttpFilterConfig<EHF> for FilterConfig {
             filter_config: self.clone(),
             per_route_config: None,
             request_headers_map: None,
+            is_upgrade_request: false,
         })
     }
 }
@@ -294,6 +295,7 @@ pub struct Filter {
     filter_config: FilterConfig,
     per_route_config: Option<Box<PerRouteConfig>>,
     request_headers_map: Option<HashMap<String, String>>,
+    is_upgrade_request: bool,
 }
 
 impl Filter {
@@ -392,6 +394,30 @@ impl Filter {
         !transform.is_empty()
     }
 
+    // Returns true if the request is a WebSocket upgrade or an HTTP CONNECT request,
+    // both of which involve a persistent tunnel that should not be body-buffered.
+    fn detect_upgrade_request(headers: &HashMap<String, String>) -> bool {
+        if headers
+            .get("upgrade")
+            .is_some_and(|v| v.eq_ignore_ascii_case("websocket"))
+        {
+            return true;
+        }
+        if headers
+            .get(":method")
+            .is_some_and(|v| v.eq_ignore_ascii_case("connect"))
+        {
+            return true;
+        }
+        false
+    }
+
+    // Returns true if buffering should be skipped, either because the transform
+    // itself requests it or because the request is an upgrade/tunnel request.
+    fn skip_buffering(&self, transform: &LocalTransform) -> bool {
+        self.is_upgrade_request || transform.skip_buffering()
+    }
+
     fn transform_request<EHF: EnvoyHttpFilter>(&self, envoy_filter: &mut EHF) -> bool {
         if let Some(transform) = self.get_request_transform() {
             match transformations::jinja::transform_request(
@@ -488,17 +514,19 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
         end_of_stream: bool,
     ) -> abi::envoy_dynamic_module_type_on_http_filter_request_headers_status {
         self.set_per_route_config(envoy_filter);
-        if !self.has_request_transform() {
+        self.populate_request_headers_map(envoy_filter.get_request_headers());
+        self.is_upgrade_request = Filter::detect_upgrade_request(self.get_request_headers_map());
+
+        let Some(transform) = self.get_request_transform() else {
+            envoy_log_trace!("on_request_headers skipping");
+            return abi::envoy_dynamic_module_type_on_http_filter_request_headers_status::Continue;
+        };
+        if transform.is_empty() {
             envoy_log_trace!("on_request_headers skipping");
             return abi::envoy_dynamic_module_type_on_http_filter_request_headers_status::Continue;
         }
 
-        if !end_of_stream
-            && self
-                .get_request_transform()
-                .as_ref()
-                .is_some_and(|t| !t.skip_buffering())
-        {
+        if !end_of_stream && !self.skip_buffering(transform) {
             envoy_log_trace!("on_request_headers buffering");
             return abi::envoy_dynamic_module_type_on_http_filter_request_headers_status::StopIteration;
         }
@@ -528,7 +556,7 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
             envoy_log_trace!("on_request_body skipping");
             return abi::envoy_dynamic_module_type_on_http_filter_request_body_status::Continue;
         }
-        if transform.skip_buffering() {
+        if self.skip_buffering(transform) {
             envoy_log_trace!("on_request_body skipped buffering");
             return abi::envoy_dynamic_module_type_on_http_filter_request_body_status::Continue;
         }
@@ -558,17 +586,16 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
         end_of_stream: bool,
     ) -> abi::envoy_dynamic_module_type_on_http_filter_response_headers_status {
         self.set_per_route_config(envoy_filter);
-        if !self.has_response_transform() {
-            envoy_log_trace!("on_response_header skipping");
+        let Some(transform) = self.get_response_transform() else {
+            envoy_log_trace!("on_response_headers skipping");
+            return abi::envoy_dynamic_module_type_on_http_filter_response_headers_status::Continue;
+        };
+        if transform.is_empty() {
+            envoy_log_trace!("on_response_headers skipping");
             return abi::envoy_dynamic_module_type_on_http_filter_response_headers_status::Continue;
         }
 
-        if !end_of_stream
-            && self
-                .get_response_transform()
-                .as_ref()
-                .is_some_and(|t| !t.skip_buffering())
-        {
+        if !end_of_stream && !self.skip_buffering(transform) {
             envoy_log_trace!("on_response_headers buffering");
             return abi::envoy_dynamic_module_type_on_http_filter_response_headers_status::StopIteration;
         }
@@ -597,7 +624,7 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
             envoy_log_trace!("on_response_body skipping");
             return abi::envoy_dynamic_module_type_on_http_filter_response_body_status::Continue;
         }
-        if transform.skip_buffering() {
+        if self.skip_buffering(transform) {
             envoy_log_trace!("on_response_body skipped buffering");
             return abi::envoy_dynamic_module_type_on_http_filter_response_body_status::Continue;
         }
