@@ -117,6 +117,7 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
                 );
             }
         };
+        envoy_log_info!("http-acl: ip: {ip}");
         let decision = acl.evaluate(ip);
         match decision.action {
             Action::Allow => {
