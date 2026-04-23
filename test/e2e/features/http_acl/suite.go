@@ -14,8 +14,8 @@ import (
 	"github.com/onsi/gomega"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/suite"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"google.golang.org/protobuf/encoding/protojson"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	gwv1 "sigs.k8s.io/gateway-api/apis/v1"
 
 	"github.com/kgateway-dev/kgateway/v2/pkg/utils/requestutils/curl"
@@ -410,7 +410,7 @@ func (s *testingSuite) TestHttpACLDynamicMetadata() {
 
 				g.Expect(string(cfgJSON)).To(gomega.ContainSubstring("dev.kgateway.http.acl:blocked-by"),
 					"access log format string should be present in Envoy config")
-			}).WithTimeout(30*time.Second).WithPolling(time.Second).
+			}).WithTimeout(30 * time.Second).WithPolling(time.Second).
 				Should(gomega.Succeed())
 		},
 	)
@@ -454,6 +454,39 @@ func (s *testingSuite) TestHttpACLDynamicMetadata() {
 		assert.Contains(c, logs, `"blocked_by":"rule"`)
 		assert.Contains(c, logs, `"blocked_by":"default"`)
 	}, 5*time.Second, 100*time.Millisecond)
+}
+
+// TestHttpACLLargeRuleset verifies the control plane can accept and apply a TrafficPolicy
+// with 200 rules and 20 CIDRs per rule (4000 total), covering IPv4 (/8–/32, 0.0.0.0/0),
+// IPv6 short form (::1/128, fe80::/10, ::/0), IPv6 long form (no compression), partial
+// compression (2001:db8::x:y), IPv4-mapped (::ffff:...), ULA (fd::/8), multicast (ff::/8),
+// and various prefix lengths (/7, /10, /12, /16, /24, /32, /48, /64, /96, /128).
+// defaultAction=deny; even-numbered rules (0, 2, 4, ...) are allow, odd rules are deny.
+// Rule rule-00000 allows 10.0.0.0/24, so 10.0.0.1 should pass; 8.8.8.8 has no match and is denied.
+func (s *testingSuite) TestHttpACLLargeRuleset() {
+	s.TestInstallation.AssertionsT(s.T()).EventuallyHTTPRouteCondition(
+		s.Ctx, "httpbin-route", "kgateway-base", gwv1.RouteConditionAccepted, metav1.ConditionTrue,
+	)
+
+	s.T().Log("10.0.0.1 matches rule-00000 (allow, 10.0.0.0/24) → allowed")
+	common.BaseGateway.Send(
+		s.T(),
+		expectAllowed,
+		curl.WithHostHeader("httpbin"),
+		curl.WithPort(80),
+		curl.WithPath("/status/200"),
+		curl.WithHeader("X-Forwarded-For", "10.0.0.1"),
+	)
+
+	s.T().Log("8.8.8.8 matches no rule → denied by defaultAction=deny")
+	common.BaseGateway.Send(
+		s.T(),
+		expectDenied,
+		curl.WithHostHeader("httpbin"),
+		curl.WithPort(80),
+		curl.WithPath("/status/200"),
+		curl.WithHeader("X-Forwarded-For", "8.8.8.8"),
+	)
 }
 
 // TestHttpACLGatewayLevel verifies that an ACL policy attached via targetRef to a Gateway

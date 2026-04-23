@@ -176,3 +176,14 @@ The filter defines a single Envoy counter:
 | `dev.kgateway.http.acl.blocked`    | counter | the filter denies a request (for any `blocked-by` reason) |
 
 The counter is defined once per filter config (via the SDK's `define_counter`) and incremented by 1 on each deny. It is exported through Envoy's normal stats pipeline (admin `/stats` endpoint, Prometheus, stats sinks, etc.); the exact surface name may be prefixed by Envoy's dynamic-modules stats scope.
+
+## Scalability
+
+Here is some comparison in parsing the json config:
+| Json (bytes) | Time Taken | Note |
+| ------------ | ---------- | ---- |
+| 76           | 10 - 30 us | |
+| 249          | ~ 50 us    | |
+| 76232        | ~ 6.27 ms  | about 4000 CIDR blocks |
+
+The lookup time varies between 1 - 10 us regardless of the number of CIDR blocks
