@@ -16,10 +16,13 @@ type ACLRule struct {
 	// +kubebuilder:validation:MaxLength=256
 	Name *string `json:"name,omitempty"`
 
-	// CIDR is an IP address or CIDR range (e.g. "10.0.0.0/8", "2001:db8::/32", "192.168.1.1", "::1").
+	// CIDRs is a list of IP addresses or CIDR ranges (e.g. "10.0.0.0/8", "2001:db8::/32", "192.168.1.1", "::1").
 	// Bare IPs without a prefix are treated as /32 for IPv4 and /128 for IPv6.
+	// All entries share the same name and action.
 	// +required
-	CIDR IPOrCIDR `json:"cidr"`
+	// +kubebuilder:validation:MinItems=1
+	// +kubebuilder:validation:MaxItems=256
+	CIDRs []IPOrCIDR `json:"cidrs"`
 
 	// Action determines what to do when a client IP matches this rule.
 	// +required

@@ -42,11 +42,14 @@ spec:
     defaultAction: allow
     rules:
       - name: block-internal-range
-        cidr: "10.0.0.0/8"
+        cidrs:
+          - "10.0.0.0/8"
         action: deny
       - name: allow-trusted-subnet
-        cidr: "10.1.0.0/16"
+        cidrs:
+          - "10.1.0.0/16"
         action: allow
       - name: block-rogue-host
-        cidr: "10.1.2.3/32"
+        cidrs:
+          - "10.1.2.3/32"
         action: deny

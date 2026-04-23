@@ -40,5 +40,6 @@ spec:
   httpAcl:
     defaultAction: allow
     rules:
-      - cidr: "192.168.0.0/16"
+      - cidrs:
+          - "192.168.0.0/16"
         action: deny

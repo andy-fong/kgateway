@@ -59,19 +59,24 @@ spec:
     defaultAction: allow
     rules:
       - name: block-internal-range
-        cidr: "10.0.0.0/8"
+        cidrs:
+          - "10.0.0.0/8"
         action: deny
       - name: allow-trusted-subnet
-        cidr: "10.1.0.0/16"
+        cidrs:
+          - "10.1.0.0/16"
         action: allow
       - name: block-ipv6-range
-        cidr: "2001:db8::/32"
+        cidrs:
+          - "2001:db8::/32"
         action: deny
       - name: block-single-ipv4
-        cidr: "192.168.1.100"
+        cidrs:
+          - "192.168.1.100"
         action: deny
       - name: block-single-ipv6
-        cidr: "2001:db8::1"
+        cidrs:
+          - "2001:db8::1"
         action: deny
     denyResponse:
       statusCode: 403

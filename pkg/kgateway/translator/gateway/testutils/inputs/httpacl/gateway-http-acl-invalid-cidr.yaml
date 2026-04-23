@@ -52,5 +52,6 @@ spec:
     defaultAction: allow
     rules:
       - name: invalid-cidr-rule
-        cidr: "not-a-cidr"
+        cidrs:
+          - "not-a-cidr"
         action: deny

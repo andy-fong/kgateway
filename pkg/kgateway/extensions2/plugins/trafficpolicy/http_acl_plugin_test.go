@@ -25,7 +25,7 @@ func TestHttpACLIREquals(t *testing.T) {
 
 	allowAllCfg := makeFilterCfg(`{"defaultAction":"allow"}`)
 	denyAllCfg := makeFilterCfg(`{"defaultAction":"deny"}`)
-	withRulesCfg := makeFilterCfg(`{"defaultAction":"allow","rules":[{"cidr":"10.0.0.0/8","action":"deny"}]}`)
+	withRulesCfg := makeFilterCfg(`{"defaultAction":"allow","rules":[{"cidrs":["10.0.0.0/8"],"action":"deny"}]}`)
 
 	tests := []struct {
 		name     string

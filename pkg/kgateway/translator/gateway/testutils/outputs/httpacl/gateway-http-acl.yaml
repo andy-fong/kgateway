@@ -67,7 +67,7 @@ Routes:
         name: rust_module
       filterConfig:
         '@type': type.googleapis.com/google.protobuf.StringValue
-        value: '{"defaultAction":"allow","rules":[{"name":"block-internal-range","cidr":"10.0.0.0/8","action":"deny"},{"name":"allow-trusted-subnet","cidr":"10.1.0.0/16","action":"allow"},{"name":"block-ipv6-range","cidr":"2001:db8::/32","action":"deny"},{"name":"block-single-ipv4","cidr":"192.168.1.100","action":"deny"},{"name":"block-single-ipv6","cidr":"2001:db8::1","action":"deny"}],"denyResponse":{"statusCode":403,"addBlockedByHeader":"X-Blocked-By"}}'
+        value: '{"defaultAction":"allow","rules":[{"name":"block-internal-range","cidrs":["10.0.0.0/8"],"action":"deny"},{"name":"allow-trusted-subnet","cidrs":["10.1.0.0/16"],"action":"allow"},{"name":"block-ipv6-range","cidrs":["2001:db8::/32"],"action":"deny"},{"name":"block-single-ipv4","cidrs":["192.168.1.100"],"action":"deny"},{"name":"block-single-ipv6","cidrs":["2001:db8::1"],"action":"deny"}],"denyResponse":{"statusCode":403,"addBlockedByHeader":"X-Blocked-By"}}'
       perRouteConfigName: http-acl
   virtualHosts:
   - domains:

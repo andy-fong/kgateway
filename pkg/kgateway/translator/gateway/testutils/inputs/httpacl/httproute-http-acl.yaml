@@ -58,11 +58,15 @@ spec:
   httpAcl:
     defaultAction: deny
     rules:
-      - cidr: "10.0.0.0/8"
+      - cidrs:
+          - "10.0.0.0/8"
         action: allow
-      - cidr: "2001:db8::/32"
+      - cidrs:
+          - "2001:db8::/32"
         action: allow
-      - cidr: "192.168.1.100"
+      - cidrs:
+          - "192.168.1.100"
         action: allow
-      - cidr: "2001:db8::1"
+      - cidrs:
+          - "2001:db8::1"
         action: allow

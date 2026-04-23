@@ -43,9 +43,12 @@ spec:
       addBlockedByHeader: X-Blocked-By
     rules:
       - name: block-internal-range
-        cidr: "10.0.0.0/8"
+        cidrs:
+          - "10.0.0.0/8"
         action: deny
-      - cidr: "192.168.0.0/16"
+      - cidrs:
+          - "192.168.0.0/16"
         action: deny
-      - cidr: "203.0.113.0/24"
+      - cidrs:
+          - "203.0.113.0/24"
         action: allow

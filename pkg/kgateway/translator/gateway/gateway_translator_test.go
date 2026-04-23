@@ -2052,7 +2052,7 @@ func TestBasic(t *testing.T) {
 		}
 		_, err := tc.Run(t, ctx, translatortest.NewScheme(nil), translatortest.ExtraConfig{})
 		require.Error(t, err)
-		require.Contains(t, err.Error(), "cidr")
+		require.Contains(t, err.Error(), "cidrs")
 	})
 
 	t.Run("RBAC Policy at route level", func(t *testing.T) {
