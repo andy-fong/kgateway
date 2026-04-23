@@ -24,7 +24,7 @@ import (
 	"github.com/kgateway-dev/kgateway/v2/test/e2e/features/faultinjection"
 	"github.com/kgateway-dev/kgateway/v2/test/e2e/features/frontendtls"
 	"github.com/kgateway-dev/kgateway/v2/test/e2e/features/header_modifiers"
-	"github.com/kgateway-dev/kgateway/v2/test/e2e/features/httpacl"
+	"github.com/kgateway-dev/kgateway/v2/test/e2e/features/http_acl"
 	"github.com/kgateway-dev/kgateway/v2/test/e2e/features/jwt"
 	"github.com/kgateway-dev/kgateway/v2/test/e2e/features/lambda"
 	"github.com/kgateway-dev/kgateway/v2/test/e2e/features/leaderelection"
@@ -94,7 +94,7 @@ func KubeGatewaySuiteRunner() e2e.SuiteRunner {
 	kubeGatewaySuiteRunner.Register("PathMatching", path_matching.NewTestingSuite)
 	kubeGatewaySuiteRunner.Register("TimeoutRetry", timeoutretry.NewTestingSuite)
 	kubeGatewaySuiteRunner.Register("RBAC", rbac.NewTestingSuite)
-	kubeGatewaySuiteRunner.Register("HttpACL", httpacl.NewTestingSuite)
+	kubeGatewaySuiteRunner.Register("HttpACL", http_acl.NewTestingSuite)
 	kubeGatewaySuiteRunner.Register("APIKeyAuth", apikeyauth.NewTestingSuite)
 	kubeGatewaySuiteRunner.Register("AdminServer", admin_server.NewTestingSuite)
 	kubeGatewaySuiteRunner.Register("JWT", jwt.NewTestingSuite)

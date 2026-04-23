@@ -1,6 +1,6 @@
 //go:build e2e
 
-package httpacl
+package http_acl
 
 import (
 	"net/http"
