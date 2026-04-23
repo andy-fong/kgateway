@@ -24,6 +24,7 @@ var (
 	routeHTTPACLManifest     = filepath.Join(fsutils.MustGetThisDir(), "testdata", "route-http-acl.yaml")
 	httprouteHTTPACLManifest = filepath.Join(fsutils.MustGetThisDir(), "testdata", "httproute-http-acl.yaml")
 	gatewayHTTPACLManifest   = filepath.Join(fsutils.MustGetThisDir(), "testdata", "gateway-http-acl.yaml")
+	aclAccessLogManifest     = filepath.Join(fsutils.MustGetThisDir(), "testdata", "acl-access-log.yaml")
 
 	// proxyObjectMeta targets the shared gateway deployment for Envoy admin API access.
 	proxyObjectMeta = metav1.ObjectMeta{
@@ -71,6 +72,9 @@ var (
 		},
 		"TestHttpACLGatewayLevel": {
 			Manifests: []string{gatewayHTTPACLManifest},
+		},
+		"TestHttpACLDynamicMetadata": {
+			Manifests: []string{aclAccessLogManifest},
 		},
 	}
 )

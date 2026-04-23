@@ -5,19 +5,23 @@ package http_acl
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
 
 	adminv3 "github.com/envoyproxy/go-control-plane/envoy/admin/v3"
 	"github.com/onsi/gomega"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/suite"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"google.golang.org/protobuf/encoding/protojson"
 	gwv1 "sigs.k8s.io/gateway-api/apis/v1"
 
 	"github.com/kgateway-dev/kgateway/v2/pkg/utils/requestutils/curl"
 	"github.com/kgateway-dev/kgateway/v2/test/e2e"
 	"github.com/kgateway-dev/kgateway/v2/test/e2e/common"
+	"github.com/kgateway-dev/kgateway/v2/test/e2e/defaults"
 	"github.com/kgateway-dev/kgateway/v2/test/e2e/tests/base"
 	"github.com/kgateway-dev/kgateway/v2/test/envoyutils/admincli"
 	testmatchers "github.com/kgateway-dev/kgateway/v2/test/gomega/matchers"
@@ -359,6 +363,97 @@ func (s *testingSuite) TestHttpACLHTTPRouteLevel() {
 		curl.WithPath("/get"),
 		curl.WithHeader("X-Forwarded-For", "8.8.8.8"),
 	)
+}
+
+// getGatewayPods returns the pod names for the gateway proxy deployment.
+func (s *testingSuite) getGatewayPods() []string {
+	label := fmt.Sprintf("%s=%s", defaults.WellKnownAppLabel, proxyObjectMeta.GetName())
+	s.TestInstallation.AssertionsT(s.T()).EventuallyPodsRunning(
+		s.Ctx,
+		proxyObjectMeta.GetNamespace(),
+		metav1.ListOptions{LabelSelector: label},
+	)
+	pods, err := s.TestInstallation.Actions.Kubectl().GetPodsInNsWithLabel(
+		s.Ctx,
+		proxyObjectMeta.GetNamespace(),
+		label,
+	)
+	s.Require().NoError(err)
+	return pods
+}
+
+// TestHttpACLDynamicMetadata verifies that the HTTP ACL filter emits dynamic metadata
+// under namespace dev.kgateway.http.acl, key blocked-by, visible in access logs.
+// Rules: deny 10.0.0.0/8 (named "block-internal-range"), deny 192.168.0.0/16 (unnamed);
+// defaultAction=deny; allow 203.0.113.0/24.
+func (s *testingSuite) TestHttpACLDynamicMetadata() {
+	s.TestInstallation.AssertionsT(s.T()).EventuallyHTTPRouteCondition(
+		s.Ctx, "httpbin-route", "kgateway-base", gwv1.RouteConditionAccepted, metav1.ConditionTrue,
+	)
+	s.TestInstallation.AssertionsT(s.T()).EventuallyHTTPListenerPolicyCondition(
+		s.Ctx, "acl-access-log", "kgateway-base", gwv1.GatewayConditionAccepted, metav1.ConditionTrue,
+	)
+
+	pods := s.getGatewayPods()
+
+	// Confirm the access log format string has propagated to Envoy before sending requests.
+	s.TestInstallation.AssertionsT(s.T()).AssertEnvoyAdminApi(
+		s.Ctx,
+		proxyObjectMeta,
+		func(ctx context.Context, adminClient *admincli.Client) {
+			s.TestInstallation.AssertionsT(s.T()).Gomega.Eventually(func(g gomega.Gomega) {
+				cfgDump, err := adminClient.GetConfigDump(ctx, nil)
+				g.Expect(err).NotTo(gomega.HaveOccurred(), "can get config dump")
+
+				cfgJSON, err := protojson.Marshal(cfgDump)
+				g.Expect(err).NotTo(gomega.HaveOccurred(), "can marshal config dump")
+
+				g.Expect(string(cfgJSON)).To(gomega.ContainSubstring("dev.kgateway.http.acl:blocked-by"),
+					"access log format string should be present in Envoy config")
+			}).WithTimeout(30*time.Second).WithPolling(time.Second).
+				Should(gomega.Succeed())
+		},
+	)
+
+	s.T().Log("named rule deny: blocked-by should be 'block-internal-range'")
+	common.BaseGateway.Send(
+		s.T(),
+		expectDenied,
+		curl.WithHostHeader("httpbin"),
+		curl.WithPort(80),
+		curl.WithPath("/status/200"),
+		curl.WithHeader("X-Forwarded-For", "10.5.5.5"),
+	)
+
+	s.T().Log("unnamed rule deny: blocked-by should be 'rule'")
+	common.BaseGateway.Send(
+		s.T(),
+		expectDenied,
+		curl.WithHostHeader("httpbin"),
+		curl.WithPort(80),
+		curl.WithPath("/status/200"),
+		curl.WithHeader("X-Forwarded-For", "192.168.1.1"),
+	)
+
+	s.T().Log("default action deny: blocked-by should be 'default'")
+	common.BaseGateway.Send(
+		s.T(),
+		expectDenied,
+		curl.WithHostHeader("httpbin"),
+		curl.WithPort(80),
+		curl.WithPath("/status/200"),
+		curl.WithHeader("X-Forwarded-For", "8.8.8.8"),
+	)
+
+	s.Require().EventuallyWithT(func(c *assert.CollectT) {
+		logs, err := s.TestInstallation.Actions.Kubectl().GetContainerLogs(
+			s.Ctx, proxyObjectMeta.GetNamespace(), pods[0],
+		)
+		s.Require().NoError(err)
+		assert.Contains(c, logs, `"blocked_by":"block-internal-range"`)
+		assert.Contains(c, logs, `"blocked_by":"rule"`)
+		assert.Contains(c, logs, `"blocked_by":"default"`)
+	}, 5*time.Second, 100*time.Millisecond)
 }
 
 // TestHttpACLGatewayLevel verifies that an ACL policy attached via targetRef to a Gateway
