@@ -1,0 +1,240 @@
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: test
+spec:
+  gatewayClassName: kgateway
+  listeners:
+  - name: http
+    protocol: HTTP
+    port: 8080
+---
+# Four routes, each with two ACL policies at the same route level.
+# PolicyMerge acl=DeepMerge is set in the test; rules are unioned and
+# the higher-priority (weight: 5) policy wins on scalar conflicts.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: test
+spec:
+  parentRefs:
+  - name: test
+  hostnames:
+  - "test.com"
+  rules:
+  # Case 1: same defaultAction + same denyResponse.statusCode
+  # Expected: defaultAction=deny (no conflict), rules unioned, statusCode=403 (no conflict).
+  - name: same-action-same-status
+    backendRefs:
+    - name: test
+      port: 80
+    matches:
+    - path:
+        type: PathPrefix
+        value: /same-action-same-status
+  # Case 2: same defaultAction + different denyResponse.statusCode
+  # Expected: defaultAction=deny (no conflict), rules unioned, statusCode=403 (policy-a wins).
+  - name: same-action-diff-status
+    backendRefs:
+    - name: test
+      port: 80
+    matches:
+    - path:
+        type: PathPrefix
+        value: /same-action-diff-status
+  # Case 3: different defaultAction + same denyResponse.statusCode
+  # Expected: defaultAction=allow (policy-a wins), rules unioned, statusCode=403 (no conflict).
+  - name: diff-action-same-status
+    backendRefs:
+    - name: test
+      port: 80
+    matches:
+    - path:
+        type: PathPrefix
+        value: /diff-action-same-status
+  # Case 4: different defaultAction + different denyResponse.statusCode
+  # Expected: defaultAction=allow (policy-a wins), rules unioned, statusCode=403 (policy-a wins).
+  - name: diff-action-diff-status
+    backendRefs:
+    - name: test
+      port: 80
+    matches:
+    - path:
+        type: PathPrefix
+        value: /diff-action-diff-status
+---
+# ── Case 1: same defaultAction, same denyResponse.statusCode ──────────────────
+apiVersion: gateway.kgateway.dev/v1alpha1
+kind: TrafficPolicy
+metadata:
+  name: same-action-same-status-policy-a
+  annotations:
+    kgateway.dev/policy-weight: "5"
+spec:
+  targetRefs:
+  - group: gateway.networking.k8s.io
+    kind: HTTPRoute
+    name: test
+    sectionName: same-action-same-status
+  acl:
+    defaultAction: deny
+    rules:
+    - cidrs:
+      - "10.0.0.0/8"
+      action: allow
+    denyResponse:
+      statusCode: 403
+---
+apiVersion: gateway.kgateway.dev/v1alpha1
+kind: TrafficPolicy
+metadata:
+  name: same-action-same-status-policy-b
+spec:
+  targetRefs:
+  - group: gateway.networking.k8s.io
+    kind: HTTPRoute
+    name: test
+    sectionName: same-action-same-status
+  acl:
+    defaultAction: deny
+    rules:
+    - cidrs:
+      - "192.168.0.0/16"
+      action: allow
+    denyResponse:
+      statusCode: 403
+---
+# ── Case 2: same defaultAction, different denyResponse.statusCode ─────────────
+apiVersion: gateway.kgateway.dev/v1alpha1
+kind: TrafficPolicy
+metadata:
+  name: same-action-diff-status-policy-a
+  annotations:
+    kgateway.dev/policy-weight: "5"
+spec:
+  targetRefs:
+  - group: gateway.networking.k8s.io
+    kind: HTTPRoute
+    name: test
+    sectionName: same-action-diff-status
+  acl:
+    defaultAction: deny
+    rules:
+    - cidrs:
+      - "10.0.0.0/8"
+      action: allow
+    denyResponse:
+      statusCode: 403
+---
+apiVersion: gateway.kgateway.dev/v1alpha1
+kind: TrafficPolicy
+metadata:
+  name: same-action-diff-status-policy-b
+spec:
+  targetRefs:
+  - group: gateway.networking.k8s.io
+    kind: HTTPRoute
+    name: test
+    sectionName: same-action-diff-status
+  acl:
+    defaultAction: deny
+    rules:
+    - cidrs:
+      - "172.16.0.0/12"
+      action: allow
+    denyResponse:
+      statusCode: 451
+---
+# ── Case 3: different defaultAction, same denyResponse.statusCode ─────────────
+apiVersion: gateway.kgateway.dev/v1alpha1
+kind: TrafficPolicy
+metadata:
+  name: diff-action-same-status-policy-a
+  annotations:
+    kgateway.dev/policy-weight: "5"
+spec:
+  targetRefs:
+  - group: gateway.networking.k8s.io
+    kind: HTTPRoute
+    name: test
+    sectionName: diff-action-same-status
+  acl:
+    defaultAction: allow
+    rules:
+    - cidrs:
+      - "10.0.0.0/8"
+      action: deny
+    denyResponse:
+      statusCode: 403
+---
+apiVersion: gateway.kgateway.dev/v1alpha1
+kind: TrafficPolicy
+metadata:
+  name: diff-action-same-status-policy-b
+spec:
+  targetRefs:
+  - group: gateway.networking.k8s.io
+    kind: HTTPRoute
+    name: test
+    sectionName: diff-action-same-status
+  acl:
+    defaultAction: deny
+    rules:
+    - cidrs:
+      - "192.168.0.0/16"
+      action: allow
+    denyResponse:
+      statusCode: 403
+---
+# ── Case 4: different defaultAction, different denyResponse.statusCode ────────
+apiVersion: gateway.kgateway.dev/v1alpha1
+kind: TrafficPolicy
+metadata:
+  name: diff-action-diff-status-policy-a
+  annotations:
+    kgateway.dev/policy-weight: "5"
+spec:
+  targetRefs:
+  - group: gateway.networking.k8s.io
+    kind: HTTPRoute
+    name: test
+    sectionName: diff-action-diff-status
+  acl:
+    defaultAction: allow
+    rules:
+    - cidrs:
+      - "10.0.0.0/8"
+      action: deny
+    denyResponse:
+      statusCode: 403
+---
+apiVersion: gateway.kgateway.dev/v1alpha1
+kind: TrafficPolicy
+metadata:
+  name: diff-action-diff-status-policy-b
+spec:
+  targetRefs:
+  - group: gateway.networking.k8s.io
+    kind: HTTPRoute
+    name: test
+    sectionName: diff-action-diff-status
+  acl:
+    defaultAction: deny
+    rules:
+    - cidrs:
+      - "172.16.0.0/12"
+      action: allow
+    denyResponse:
+      statusCode: 451
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: test
+spec:
+  selector:
+    test: test
+  ports:
+  - protocol: TCP
+    port: 80
+    targetPort: test

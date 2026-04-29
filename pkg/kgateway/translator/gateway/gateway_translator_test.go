@@ -702,6 +702,48 @@ func TestBasic(t *testing.T) {
 			})
 	})
 
+	t.Run("TrafficPolicy ACL deep merge", func(t *testing.T) {
+		test(t, translatorTestCase{
+			inputFile:  "traffic-policy/acl-deep-merge.yaml",
+			outputFile: "traffic-policy/acl-deep-merge.yaml",
+			gwNN: types.NamespacedName{
+				Namespace: "default",
+				Name:      "test",
+			},
+		},
+			func(s *apisettings.Settings) {
+				s.PolicyMerge = `{"trafficPolicy":{"acl":"DeepMerge"}}`
+			})
+	})
+
+	t.Run("TrafficPolicy ACL multiple policies deep merge", func(t *testing.T) {
+		test(t, translatorTestCase{
+			inputFile:  "traffic-policy/acl-multiple-policies.yaml",
+			outputFile: "traffic-policy/acl-multiple-policies-deep-merge.yaml",
+			gwNN: types.NamespacedName{
+				Namespace: "default",
+				Name:      "test",
+			},
+		},
+			func(s *apisettings.Settings) {
+				s.PolicyMerge = `{"trafficPolicy":{"acl":"DeepMerge"}}`
+			})
+	})
+
+	// Same input as above but without PolicyMerge: the default AugmentedShallowMerge
+	// means only the highest-priority policy (policy-a, weight=5) wins per route;
+	// policy-b is skipped entirely and its rules never appear in the output.
+	t.Run("TrafficPolicy ACL multiple policies default merge", func(t *testing.T) {
+		test(t, translatorTestCase{
+			inputFile:  "traffic-policy/acl-multiple-policies.yaml",
+			outputFile: "traffic-policy/acl-multiple-policies-default-merge.yaml",
+			gwNN: types.NamespacedName{
+				Namespace: "default",
+				Name:      "test",
+			},
+		})
+	})
+
 	t.Run("TrafficPolicy Transformation skip body buffering", func(t *testing.T) {
 		test(t, translatorTestCase{
 			inputFile:  "traffic-policy/transformation-skip-body-buffering.yaml",
