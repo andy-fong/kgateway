@@ -73,6 +73,26 @@ func TestMergeHttpACL(t *testing.T) {
 		return m
 	}
 
+	assertRuleCIDR := func(t *testing.T, rules []any, idx int, expectedCIDR string) {
+		t.Helper()
+		require.Less(t, idx, len(rules), "rule index out of range")
+		rule, ok := rules[idx].(map[string]any)
+		require.True(t, ok, "rule at index %d is not a map", idx)
+		cidrs, ok := rule["cidrs"].([]any)
+		require.True(t, ok, "cidrs field is not a slice")
+		require.Len(t, cidrs, 1)
+		assert.Equal(t, expectedCIDR, cidrs[0])
+	}
+
+	assertHeader := func(t *testing.T, hdrs []any, idx int, expectedName, expectedValue string) {
+		t.Helper()
+		require.Less(t, idx, len(hdrs), "header index out of range")
+		hdr, ok := hdrs[idx].(map[string]any)
+		require.True(t, ok, "header at index %d is not a map", idx)
+		assert.Equal(t, expectedName, hdr["name"])
+		assert.Equal(t, expectedValue, hdr["value"])
+	}
+
 	t.Run("shallow augmented: p2 fills in when p1 empty", func(t *testing.T) {
 		p1 := &TrafficPolicy{ct: time.Now()}
 		p2 := makePolicy(t, shared.ACLActionAllow, nil, nil)
@@ -133,7 +153,7 @@ func TestMergeHttpACL(t *testing.T) {
 		assert.Equal(t, 1, len(origins["httpACL"]))
 	})
 
-	t.Run("deep augmented: p1 wins on defaultAction conflict, rules still unioned", func(t *testing.T) {
+	t.Run("deep augmented: on defaultAction conflict, fallback to default shallow merge", func(t *testing.T) {
 		p1 := makePolicy(t, shared.ACLActionDeny, []shared.ACLRule{
 			{CIDRs: []shared.IPOrCIDR{"10.0.0.0/8"}, Action: shared.ACLActionAllow},
 		}, nil)
@@ -145,14 +165,15 @@ func TestMergeHttpACL(t *testing.T) {
 		mergeHttpACL(p1, p2, p2Ref, nil, policy.MergeOptions{Strategy: policy.AugmentedDeepMerge}, origins, TrafficPolicyMergeOpts{})
 
 		j := extractJSON(t, p1)
-		assert.Equal(t, "deny", j["defaultAction"], "p1 should win on defaultAction conflict")
+		assert.Equal(t, "deny", j["defaultAction"], "should stay with p1")
 		rules, ok := j["rules"].([]any)
 		require.True(t, ok)
-		assert.Len(t, rules, 2, "rules are always unioned even when defaultAction conflicts")
-		assert.Contains(t, origins, "httpACL")
+		assert.Len(t, rules, 1, "should only use rules from p1")
+		assertRuleCIDR(t, rules, 0, "10.0.0.0/8")
+		assert.Empty(t, origins)
 	})
 
-	t.Run("deep overridable: p2 wins on defaultAction conflict, rules still unioned", func(t *testing.T) {
+	t.Run("deep overridable: on defaultAction conflict, fallback to default shallow merge", func(t *testing.T) {
 		p1 := makePolicy(t, shared.ACLActionDeny, []shared.ACLRule{
 			{CIDRs: []shared.IPOrCIDR{"10.0.0.0/8"}, Action: shared.ACLActionAllow},
 		}, nil)
@@ -164,11 +185,12 @@ func TestMergeHttpACL(t *testing.T) {
 		mergeHttpACL(p1, p2, p2Ref, nil, policy.MergeOptions{Strategy: policy.OverridableDeepMerge}, origins, TrafficPolicyMergeOpts{})
 
 		j := extractJSON(t, p1)
-		assert.Equal(t, "allow", j["defaultAction"], "p2 should win on defaultAction conflict for overridable")
+		assert.Equal(t, "deny", j["defaultAction"], "should stay with p1")
 		rules, ok := j["rules"].([]any)
 		require.True(t, ok)
-		assert.Len(t, rules, 2, "rules are always unioned even when defaultAction conflicts")
-		assert.Contains(t, origins, "httpACL")
+		assert.Len(t, rules, 1, "should only use rules from p1")
+		assertRuleCIDR(t, rules, 0, "10.0.0.0/8")
+		assert.Empty(t, origins)
 	})
 
 	t.Run("deep augmented: p1 nil httpACL, p2 fills in fully", func(t *testing.T) {
@@ -188,13 +210,13 @@ func TestMergeHttpACL(t *testing.T) {
 		assert.Contains(t, origins, "httpACL")
 	})
 
-	t.Run("deep augmented: denyResponse scalars merged, p1 wins, headers unioned", func(t *testing.T) {
+	t.Run("deep augmented: denyResponse scalars merged, headers unioned", func(t *testing.T) {
 		p1 := makePolicy(t, shared.ACLActionDeny, nil, &shared.ACLDenyResponse{
 			StatusCode: int32Ptr(403),
 			Headers:    []shared.ACLResponseHeader{{Name: "X-Block", Value: "1"}},
 		})
 		p2 := makePolicy(t, shared.ACLActionDeny, nil, &shared.ACLDenyResponse{
-			StatusCode:          int32Ptr(451),
+			StatusCode:          int32Ptr(403),
 			Headers:             []shared.ACLResponseHeader{{Name: "X-Reason", Value: "geo"}},
 			BlockedByHeaderName: strPtr("X-Blocked-By"),
 		})
@@ -227,11 +249,13 @@ func TestMergeHttpACL(t *testing.T) {
 		assert.Equal(t, float64(451), dr["statusCode"])
 	})
 
-	t.Run("deep overridable: denyResponse scalars merged, p2 wins", func(t *testing.T) {
+	t.Run("deep overridable: denyResponse with conflicting status fallback to default shallow merge", func(t *testing.T) {
 		p1 := makePolicy(t, shared.ACLActionDeny, nil, &shared.ACLDenyResponse{
+			Headers:    []shared.ACLResponseHeader{{Name: "X-Block-1", Value: "1"}},
 			StatusCode: int32Ptr(403),
 		})
 		p2 := makePolicy(t, shared.ACLActionDeny, nil, &shared.ACLDenyResponse{
+			Headers:    []shared.ACLResponseHeader{{Name: "X-Block-2", Value: "2"}},
 			StatusCode: int32Ptr(451),
 		})
 		origins := ir.MergeOrigins{}
@@ -241,7 +265,33 @@ func TestMergeHttpACL(t *testing.T) {
 		j := extractJSON(t, p1)
 		dr, ok := j["denyResponse"].(map[string]any)
 		require.True(t, ok)
-		assert.Equal(t, float64(451), dr["statusCode"], "p2 statusCode wins for overridable")
+		assert.Equal(t, float64(403), dr["statusCode"], "fallback to default shallow merge because of conflict")
+		hdrs, ok := dr["headers"].([]any)
+		require.True(t, ok)
+		assert.Len(t, hdrs, 1)
+		assertHeader(t, hdrs, 0, "X-Block-1", "1")
+	})
+
+	t.Run("deep overridable: denyResponse with no conflict", func(t *testing.T) {
+		p1 := makePolicy(t, shared.ACLActionDeny, nil, &shared.ACLDenyResponse{
+			Headers:    []shared.ACLResponseHeader{{Name: "X-Block-1", Value: "1"}},
+			StatusCode: int32Ptr(403),
+		})
+		p2 := makePolicy(t, shared.ACLActionDeny, nil, &shared.ACLDenyResponse{
+			Headers:    []shared.ACLResponseHeader{{Name: "X-Block-2", Value: "2"}},
+			StatusCode: int32Ptr(403),
+		})
+		origins := ir.MergeOrigins{}
+
+		mergeHttpACL(p1, p2, p2Ref, nil, policy.MergeOptions{Strategy: policy.OverridableDeepMerge}, origins, TrafficPolicyMergeOpts{})
+
+		j := extractJSON(t, p1)
+		dr, ok := j["denyResponse"].(map[string]any)
+		require.True(t, ok)
+		assert.Equal(t, float64(403), dr["statusCode"])
+		hdrs, ok := dr["headers"].([]any)
+		require.True(t, ok)
+		assert.Len(t, hdrs, 2, "headers should be merged from both policies")
 	})
 
 	t.Run("detectHttpACLMergeConflict: no conflict when defaultActions match", func(t *testing.T) {

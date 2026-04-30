@@ -732,6 +732,7 @@ func mergeHttpACL(
 					p1.spec.httpACL = nil
 				}
 				defaultMerge(p1, p2, p2Ref, p2MergeOrigins, opts, mergeOrigins, accessor, "httpACL")
+				return
 			}
 			var mergedMap map[string]any
 			if opts.Strategy == policy.OverridableDeepMerge {
