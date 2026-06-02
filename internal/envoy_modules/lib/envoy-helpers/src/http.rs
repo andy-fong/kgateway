@@ -4,9 +4,14 @@ use envoy_proxy_dynamic_modules_rust_sdk::EnvoyBuffer;
 use std::collections::HashMap;
 
 /// Converts a list of raw Envoy header pairs into a [`HashMap`].
-/// Header pairs with non-UTF-8 keys or values are silently dropped.
-pub fn create_headers_map(headers: Vec<(EnvoyBuffer, EnvoyBuffer)>) -> HashMap<String, String> {
-    let mut headers_map = HashMap::new();
+/// Keys are normalized to lowercase. Header pairs with non-UTF-8 keys or
+/// values are silently dropped. When the same header key appears more than
+/// once, each value is pushed into the Vec for that key, preserving all
+/// occurrences individually.
+pub fn create_headers_map(
+    headers: Vec<(EnvoyBuffer, EnvoyBuffer)>,
+) -> HashMap<String, Vec<String>> {
+    let mut headers_map: HashMap<String, Vec<String>> = HashMap::new();
     for (key, val) in headers {
         let Some(key) = std::str::from_utf8(key.as_slice()).ok() else {
             continue;
@@ -15,27 +20,76 @@ pub fn create_headers_map(headers: Vec<(EnvoyBuffer, EnvoyBuffer)>) -> HashMap<S
             continue;
         };
 
-        headers_map.insert(key.to_string(), value.to_string());
+        headers_map
+            .entry(key.to_lowercase())
+            .or_default()
+            .push(value.to_string());
     }
 
     headers_map
 }
 
+/// Look up a header by name, lowercasing the key before the lookup so callers
+/// don't have to remember to normalize case themselves.
+pub fn get_header<'a>(
+    headers: &'a HashMap<String, Vec<String>>,
+    key: &str,
+) -> Option<&'a Vec<String>> {
+    headers.get(&key.to_lowercase())
+}
+
 /// Returns true if the request is a WebSocket upgrade or an HTTP CONNECT request.
-pub fn detect_upgrade_request(headers: &HashMap<String, String>) -> bool {
-    if headers
-        .get("upgrade")
-        .is_some_and(|v| v.eq_ignore_ascii_case("websocket"))
+pub fn detect_upgrade_request(headers: &HashMap<String, Vec<String>>) -> bool {
+    if get_header(headers, "upgrade")
+        .is_some_and(|v| v.iter().any(|s| s.eq_ignore_ascii_case("websocket")))
     {
         return true;
     }
-    if headers
-        .get(":method")
+    if get_header(headers, ":method")
+        .and_then(|v| v.first())
         .is_some_and(|v| v.eq_ignore_ascii_case("connect"))
     {
         return true;
     }
     false
+}
+
+/// Parse a single Cookie header value into a name -> value map.
+/// Cookie names are case-sensitive per RFC 6265. Cookies within the value are
+/// separated by ';'. For duplicate names the first occurrence wins. Cookie
+/// values may contain '=' characters; only the first '=' in each segment is
+/// used as the name/value delimiter.
+pub fn parse_cookie_string(cookie_str: &str) -> HashMap<String, String> {
+    let mut cookies = HashMap::new();
+    for segment in cookie_str.split(';') {
+        let pair = segment.trim();
+        if let Some(eq_pos) = pair.find('=') {
+            let name = pair[..eq_pos].trim().to_string();
+            let value = pair[eq_pos + 1..].trim().to_string();
+            if !name.is_empty() {
+                cookies.entry(name).or_insert(value);
+            }
+        }
+    }
+    cookies
+}
+
+/// Parse all Cookie header values from a header map into a single
+/// lowercase-name -> value map. Each Vec element is one Cookie header from
+/// Envoy; cookies within a header are ';'-separated. First-seen-wins for
+/// duplicate names across headers.
+pub fn parse_cookies_from_header_map(
+    headers: &HashMap<String, Vec<String>>,
+) -> HashMap<String, String> {
+    let mut cookies = HashMap::new();
+    if let Some(cookie_values) = get_header(headers, "cookie") {
+        for cookie_str in cookie_values {
+            for (name, value) in parse_cookie_string(cookie_str) {
+                cookies.entry(name).or_insert(value);
+            }
+        }
+    }
+    cookies
 }
 
 #[cfg(test)]

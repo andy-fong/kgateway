@@ -7,6 +7,7 @@ use crate::NameValuePair;
 use crate::TransformationError;
 use crate::TransformationOps;
 use anyhow::{Context, Error, Result};
+use envoy_helpers::http::{get_header, parse_cookies_from_header_map};
 use bitflags::bitflags;
 
 bitflags! {
@@ -14,6 +15,16 @@ bitflags! {
     pub struct ProcessFlags: u8 {
         const HEADER = 0b01;
         const BODY   = 0b10;
+    }
+}
+
+bitflags! {
+    /// Feature flags computed once per config load from the template strings.
+    /// Add a new constant here whenever a new template function needs per-request
+    /// setup work (e.g. pre-parsing some header into the context).
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub struct TransformFlags: u8 {
+        const USES_GET_COOKIE = 0b01;
     }
 }
 use base64::{
@@ -34,6 +45,7 @@ const STATE_LOOKUP_KEY_BODY: &str = "body.dev.kgateway";
 const STATE_LOOKUP_KEY_CONTEXT: &str = "context.dev.kgateway";
 const STATE_LOOKUP_KEY_HEADERS: &str = "headers.dev.kgateway";
 const STATE_LOOKUP_KEY_REQ_HEADERS: &str = "request_headers.dev.kgateway";
+const STATE_LOOKUP_KEY_COOKIES: &str = "cookies.dev.kgateway";
 
 const REQUEST_BODY_TEMPLATE_LOOKUP_KEY: &str = "request_body_0";
 const RESPONSE_BODY_TEMPLATE_LOOKUP_KEY: &str = "response_body_0";
@@ -73,11 +85,12 @@ fn lookup_header(headers: Option<minijinja::Value>, key: &str) -> String {
     //       This is called inside a custom function registered to minijina and
     //       we only get the State object which can only contain minijina::Value
     //       when we get called.
-    let Some(header_map) = <HashMap<String, String>>::deserialize(headers.clone()).ok() else {
+    let Ok(header_map) = <HashMap<String, Vec<String>>>::deserialize(headers.clone()) else {
         return String::default();
     };
-    let lowercase_key = key.to_lowercase();
-    header_map.get(&lowercase_key).cloned().unwrap_or_default()
+    get_header(&header_map, key)
+        .map(|vals| vals.join(", "))
+        .unwrap_or_default()
 }
 
 fn header(state: &State, key: &str) -> String {
@@ -88,6 +101,46 @@ fn header(state: &State, key: &str) -> String {
 fn request_header(state: &State, key: &str) -> String {
     let headers = state.lookup(STATE_LOOKUP_KEY_REQ_HEADERS);
     lookup_header(headers, key)
+}
+
+fn get_cookie(state: &State, name: &str) -> String {
+    // Cookie names are case-sensitive per RFC 6265 — use name verbatim.
+    // Use pre-parsed cookies from state when available (optimization path)
+    if let Some(cookies_value) = state.lookup(STATE_LOOKUP_KEY_COOKIES) {
+        if let Ok(cookies) = <HashMap<String, String>>::deserialize(cookies_value) {
+            return cookies.get(name).cloned().unwrap_or_default();
+        }
+    }
+    // Fallback: parse cookies on demand from request headers
+    let Some(headers) = state.lookup(STATE_LOOKUP_KEY_REQ_HEADERS) else {
+        return String::default();
+    };
+    let Ok(header_map) = <HashMap<String, Vec<String>>>::deserialize(headers) else {
+        return String::default();
+    };
+    parse_cookies_from_header_map(&header_map)
+        .remove(name)
+        .unwrap_or_default()
+}
+
+/// Compute feature flags for a transform by scanning its template strings once.
+/// Call this at config load time and pass the result to [`transform_request`] /
+/// [`transform_response`] so per-request setup is driven by a flag check rather
+/// than repeated string scanning.
+pub fn compute_transform_flags(transform: &LocalTransform) -> TransformFlags {
+    let mut flags = TransformFlags::empty();
+    let has = |s: &str| s.contains("get_cookie(");
+    if transform.set.iter().any(|p| has(&p.value))
+        || transform.add.iter().any(|p| has(&p.value))
+        || transform.body.as_ref().is_some_and(|b| has(&b.value))
+        || transform
+            .dynamic_metadata
+            .iter()
+            .any(|m| m.value.string_value.as_deref().is_some_and(has))
+    {
+        flags |= TransformFlags::USES_GET_COOKIE;
+    }
+    flags
 }
 
 fn trim_outer_quotes(s: &str) -> &str {
@@ -198,6 +251,7 @@ pub fn new_jinja_env() -> Environment<'static> {
     // !! Envoy context accessors
     env.add_function("header", header);
     env.add_function("request_header", request_header);
+    env.add_function("get_cookie", get_cookie);
     // env.add_function("extraction", extraction);
     env.add_function("body", body);
     // env.add_function("dynamic_metadata", dynamic_metadata);
@@ -443,8 +497,9 @@ fn process_headers<T: TransformationOps>(
 pub fn transform_request<T: TransformationOps>(
     env: &Environment<'static>,
     transform: &LocalTransform,
-    request_headers_map: &HashMap<String, String>,
+    request_headers_map: &HashMap<String, Vec<String>>,
     flags: ProcessFlags,
+    transform_flags: TransformFlags,
     mut ops: T,
 ) -> Result<()> {
     let mut m = HashMap::new();
@@ -454,6 +509,14 @@ pub fn transform_request<T: TransformationOps>(
     let value = minijinja::Value::from_serialize(request_headers_map);
     m.insert(STATE_LOOKUP_KEY_HEADERS.to_string(), value.clone());
     m.insert(STATE_LOOKUP_KEY_REQ_HEADERS.to_string(), value);
+
+    if transform_flags.contains(TransformFlags::USES_GET_COOKIE) {
+        let cookies = parse_cookies_from_header_map(request_headers_map);
+        m.insert(
+            STATE_LOOKUP_KEY_COOKIES.to_string(),
+            minijinja::Value::from_serialize(&cookies),
+        );
+    }
 
     let mut parsed_body_as_json = false;
     if flags.contains(ProcessFlags::BODY) {
@@ -561,9 +624,10 @@ pub fn transform_request<T: TransformationOps>(
 pub fn transform_response<T: TransformationOps>(
     env: &Environment<'static>,
     transform: &LocalTransform,
-    request_headers_map: &HashMap<String, String>,
-    response_headers_map: &HashMap<String, String>,
+    request_headers_map: &HashMap<String, Vec<String>>,
+    response_headers_map: &HashMap<String, Vec<String>>,
     flags: ProcessFlags,
+    transform_flags: TransformFlags,
     mut ops: T,
 ) -> Result<()> {
     let mut m = HashMap::new();
@@ -578,6 +642,15 @@ pub fn transform_response<T: TransformationOps>(
         STATE_LOOKUP_KEY_REQ_HEADERS.to_string(),
         minijinja::Value::from_serialize(request_headers_map),
     );
+
+    if transform_flags.contains(TransformFlags::USES_GET_COOKIE) {
+        let cookies = parse_cookies_from_header_map(request_headers_map);
+        m.insert(
+            STATE_LOOKUP_KEY_COOKIES.to_string(),
+            minijinja::Value::from_serialize(&cookies),
+        );
+    }
+
     let mut parsed_body_as_json = false;
     if flags.contains(ProcessFlags::BODY) {
         if let Some(body_transform) = transform.body.as_ref() {
@@ -738,3 +811,4 @@ pub fn create_env_with_templates(
     }
     Ok(env)
 }
+

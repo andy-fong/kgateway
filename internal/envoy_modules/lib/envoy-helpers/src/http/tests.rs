@@ -1,12 +1,24 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
-use super::detect_upgrade_request;
+use super::{
+    create_headers_map, detect_upgrade_request, parse_cookie_string, parse_cookies_from_header_map,
+};
+use envoy_proxy_dynamic_modules_rust_sdk::EnvoyBuffer;
 use std::collections::HashMap;
 
-fn headers(pairs: &[(&str, &str)]) -> HashMap<String, String> {
+fn make_headers(
+    pairs: &[(&'static str, &'static str)],
+) -> Vec<(EnvoyBuffer<'static>, EnvoyBuffer<'static>)> {
     pairs
         .iter()
-        .map(|(k, v)| (k.to_string(), v.to_string()))
+        .map(|(k, v)| (EnvoyBuffer::new(k), EnvoyBuffer::new(v)))
+        .collect()
+}
+
+fn headers(pairs: &[(&str, &str)]) -> HashMap<String, Vec<String>> {
+    pairs
+        .iter()
+        .map(|(k, v)| (k.to_string(), vec![v.to_string()]))
         .collect()
 }
 
@@ -64,4 +76,116 @@ fn test_detect_upgrade_post_with_upgrade_header() {
     // POST with a websocket upgrade header should still be detected as upgrade.
     let h = headers(&[(":method", "POST"), ("upgrade", "websocket")]);
     assert!(detect_upgrade_request(&h));
+}
+
+#[test]
+fn test_parse_cookie_string_basic() {
+    let cookies = parse_cookie_string("session=abc123; user=john doe");
+    assert_eq!(cookies.get("session"), Some(&"abc123".to_string()));
+    assert_eq!(cookies.get("user"), Some(&"john doe".to_string()));
+}
+
+#[test]
+fn test_parse_cookie_string_case_sensitive_keys() {
+    // Cookie names are case-sensitive per RFC 6265.
+    let cookies = parse_cookie_string("Session=abc123; USER=johndoe");
+    assert_eq!(cookies.get("Session"), Some(&"abc123".to_string()));
+    assert_eq!(cookies.get("USER"), Some(&"johndoe".to_string()));
+    assert_eq!(cookies.get("session"), None);
+    assert_eq!(cookies.get("user"), None);
+}
+
+#[test]
+fn test_parse_cookie_string_comma_not_a_separator() {
+    // Commas are no longer treated as separators — each Cookie header value
+    // is a separate Vec element at the call site, so a comma here is part of
+    // a cookie value, not a delimiter between cookies.
+    let cookies = parse_cookie_string("session=abc123");
+    assert_eq!(cookies.get("session"), Some(&"abc123".to_string()));
+    // A comma inside a value is preserved as-is
+    let cookies2 = parse_cookie_string("token=abc,def");
+    assert_eq!(cookies2.get("token"), Some(&"abc,def".to_string()));
+}
+
+#[test]
+fn test_parse_cookie_string_value_with_equals() {
+    let cookies = parse_cookie_string("token=abc=def=ghi");
+    assert_eq!(cookies.get("token"), Some(&"abc=def=ghi".to_string()));
+}
+
+#[test]
+fn test_parse_cookie_string_duplicate_keeps_first() {
+    let cookies = parse_cookie_string("session=first; session=second");
+    assert_eq!(cookies.get("session"), Some(&"first".to_string()));
+}
+
+#[test]
+fn test_parse_cookie_string_empty() {
+    let cookies = parse_cookie_string("");
+    assert!(cookies.is_empty());
+}
+
+#[test]
+fn test_parse_cookie_string_no_equals_skipped() {
+    let cookies = parse_cookie_string("novalue; session=abc");
+    assert!(!cookies.contains_key("novalue"));
+    assert_eq!(cookies.get("session"), Some(&"abc".to_string()));
+}
+
+#[test]
+fn test_parse_cookie_string_whitespace_trimmed() {
+    let cookies = parse_cookie_string(" session = abc123 ; user = johndoe ");
+    assert_eq!(cookies.get("session"), Some(&"abc123".to_string()));
+    assert_eq!(cookies.get("user"), Some(&"johndoe".to_string()));
+}
+
+#[test]
+fn test_parse_cookies_from_header_map_missing_cookie() {
+    let headers: HashMap<String, Vec<String>> = HashMap::new();
+    let cookies = parse_cookies_from_header_map(&headers);
+    assert!(cookies.is_empty());
+}
+
+#[test]
+fn test_parse_cookies_from_header_map_with_cookie() {
+    let mut headers: HashMap<String, Vec<String>> = HashMap::new();
+    headers.insert(
+        "cookie".to_string(),
+        vec!["session=abc; user=johndoe".to_string()],
+    );
+    let cookies = parse_cookies_from_header_map(&headers);
+    assert_eq!(cookies.get("session"), Some(&"abc".to_string()));
+    assert_eq!(cookies.get("user"), Some(&"johndoe".to_string()));
+}
+
+#[test]
+fn test_parse_cookies_from_header_map_multiple_cookie_headers() {
+    // Simulates two separate Cookie headers arriving from Envoy as distinct Vec elements.
+    let mut headers: HashMap<String, Vec<String>> = HashMap::new();
+    headers.insert(
+        "cookie".to_string(),
+        vec!["session=abc".to_string(), "user=johndoe".to_string()],
+    );
+    let cookies = parse_cookies_from_header_map(&headers);
+    assert_eq!(cookies.get("session"), Some(&"abc".to_string()));
+    assert_eq!(cookies.get("user"), Some(&"johndoe".to_string()));
+}
+
+#[test]
+fn test_create_headers_map_collected_as_vec_with_case_insensitive_key() {
+    let m = create_headers_map(make_headers(&[
+        ("cookie", "session=abc"),
+        ("Cookie", "user=johndoe"),
+        ("content-Type", "application/json"),
+        ("x-Foo", "bar"),
+    ]));
+    assert_eq!(
+        m.get("cookie"),
+        Some(&vec!["session=abc".to_string(), "user=johndoe".to_string()])
+    );
+    assert_eq!(
+        m.get("content-type"),
+        Some(&vec!["application/json".to_string()])
+    );
+    assert_eq!(m.get("x-foo"), Some(&vec!["bar".to_string()]));
 }

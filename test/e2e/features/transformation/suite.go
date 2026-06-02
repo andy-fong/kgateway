@@ -59,6 +59,7 @@ var (
 	transformSkipBufferingManifest              = filepath.Join(fsutils.MustGetThisDir(), "testdata", "transform-skip-buffering.yaml")
 	transformSkipBufferingBodyFuncManifest      = filepath.Join(fsutils.MustGetThisDir(), "testdata", "transform-skip-buffering-with-body-func.yaml")
 	transformModelExtractionParseAsNoneManifest = filepath.Join(fsutils.MustGetThisDir(), "testdata", "transform-for-model-extraction-parseas-none.yaml")
+	transformForGetCookieManifest               = filepath.Join(fsutils.MustGetThisDir(), "testdata", "transform-for-get-cookie.yaml")
 
 	proxyObjectMeta = metav1.ObjectMeta{
 		Name:      "gw",
@@ -87,6 +88,7 @@ var (
 			transformSkipBufferingBodyFuncManifest,
 			rustformationForModelExtractionManifest,
 			transformModelExtractionParseAsNoneManifest,
+			transformForGetCookieManifest,
 		},
 	}
 )
@@ -775,6 +777,31 @@ func selectTestCases(indices ...int) []transformationTestCase {
 			},
 			req: &testmatchers.HttpRequest{},
 		},
+		{
+			// test 24
+			name:      "get-cookie-basic",
+			routeName: "get-cookie",
+			opts: []curl.Option{
+				curl.WithMultiHeader("Cookie", []string{"session=abc123; user=johndoe", "foo=bar; test=123"}),
+			},
+			resp: &testmatchers.HttpResponse{
+				StatusCode: http.StatusOK,
+			},
+			req: &testmatchers.HttpRequest{
+				Headers: map[string]any{
+					"x-session": "abc123",
+					"x-user":    "johndoe",
+					"x-foo":     "bar",
+					"x-test":    "123",
+				},
+				NotHeaders: []string{
+					// get_cookie("missing") returns "" which causes the header to be removed
+					"x-missing-cookie",
+					// cookie names are case-sensitive per RFC 6265: SESSION != session
+					"x-wrong-case",
+				},
+			},
+		},
 	}
 
 	// If no indices are provided, return the full original slice.
@@ -935,6 +962,7 @@ func (s *testingSuite) assertSuiteResourceStatus() {
 		"example-route-for-skip-buffering",
 		"example-route-for-skip-buffering-body-func",
 		"example-route-for-model-extraction-parseas-none",
+		"example-route-for-get-cookie",
 	}
 	trafficPoliciesToCheck := []string{
 		"example-traffic-policy-for-body-as-string",
@@ -952,6 +980,7 @@ func (s *testingSuite) assertSuiteResourceStatus() {
 		"example-traffic-policy-for-skip-buffering",
 		"example-traffic-policy-for-skip-buffering-body-func",
 		"example-traffic-policy-for-model-extraction-parseas-none",
+		"example-traffic-policy-for-get-cookie",
 	}
 	s.assertRouteAndTrafficPolicyStatus(routesToCheck, trafficPoliciesToCheck)
 }
