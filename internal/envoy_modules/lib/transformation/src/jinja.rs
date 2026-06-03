@@ -22,9 +22,16 @@ bitflags! {
     /// Feature flags computed once per config load from the template strings.
     /// Add a new constant here whenever a new template function needs per-request
     /// setup work (e.g. pre-parsing some header into the context).
+    ///
+    /// `USES_GET_COOKIE` and `USES_GET_COOKIE_I` must not be set together in the
+    /// same transform; mixing the two functions is unsupported.
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     pub struct TransformFlags: u8 {
-        const USES_GET_COOKIE = 0b01;
+        /// Case-sensitive cookie lookup via `get_cookie()`.
+        const USES_GET_COOKIE   = 0b01;
+        /// Case-insensitive cookie lookup via `get_cookie_i()`.
+        /// When set, the pre-parsed cookie map uses lowercase keys.
+        const USES_GET_COOKIE_I = 0b10;
     }
 }
 use base64::{
@@ -118,8 +125,28 @@ fn get_cookie(state: &State, name: &str) -> String {
     let Ok(header_map) = <HashMap<String, Vec<String>>>::deserialize(headers) else {
         return String::default();
     };
-    parse_cookies_from_header_map(&header_map)
+    parse_cookies_from_header_map(&header_map, false)
         .remove(name)
+        .unwrap_or_default()
+}
+
+fn get_cookie_i(state: &State, name: &str) -> String {
+    let lower_name = name.to_lowercase();
+    // Pre-parsed map was built with lowercase keys when USES_GET_COOKIE_I is set.
+    if let Some(cookies_value) = state.lookup(STATE_LOOKUP_KEY_COOKIES) {
+        if let Ok(cookies) = <HashMap<String, String>>::deserialize(cookies_value) {
+            return cookies.get(&lower_name).cloned().unwrap_or_default();
+        }
+    }
+    // Fallback: parse cookies on demand with lowercase keys
+    let Some(headers) = state.lookup(STATE_LOOKUP_KEY_REQ_HEADERS) else {
+        return String::default();
+    };
+    let Ok(header_map) = <HashMap<String, Vec<String>>>::deserialize(headers) else {
+        return String::default();
+    };
+    parse_cookies_from_header_map(&header_map, true)
+        .remove(&lower_name)
         .unwrap_or_default()
 }
 
@@ -129,16 +156,25 @@ fn get_cookie(state: &State, name: &str) -> String {
 /// than repeated string scanning.
 pub fn compute_transform_flags(transform: &LocalTransform) -> TransformFlags {
     let mut flags = TransformFlags::empty();
-    let has = |s: &str| s.contains("get_cookie(");
-    if transform.set.iter().any(|p| has(&p.value))
-        || transform.add.iter().any(|p| has(&p.value))
-        || transform.body.as_ref().is_some_and(|b| has(&b.value))
-        || transform
-            .dynamic_metadata
+    let all_templates = || {
+        transform
+            .set
             .iter()
-            .any(|m| m.value.string_value.as_deref().is_some_and(has))
-    {
+            .map(|p| p.value.as_str())
+            .chain(transform.add.iter().map(|p| p.value.as_str()))
+            .chain(transform.body.iter().map(|b| b.value.as_str()))
+            .chain(
+                transform
+                    .dynamic_metadata
+                    .iter()
+                    .filter_map(|m| m.value.string_value.as_deref()),
+            )
+    };
+    if all_templates().any(|s| s.contains("get_cookie(")) {
         flags |= TransformFlags::USES_GET_COOKIE;
+    }
+    if all_templates().any(|s| s.contains("get_cookie_i(")) {
+        flags |= TransformFlags::USES_GET_COOKIE_I;
     }
     flags
 }
@@ -252,6 +288,7 @@ pub fn new_jinja_env() -> Environment<'static> {
     env.add_function("header", header);
     env.add_function("request_header", request_header);
     env.add_function("get_cookie", get_cookie);
+    env.add_function("get_cookie_i", get_cookie_i);
     // env.add_function("extraction", extraction);
     env.add_function("body", body);
     // env.add_function("dynamic_metadata", dynamic_metadata);
@@ -510,8 +547,9 @@ pub fn transform_request<T: TransformationOps>(
     m.insert(STATE_LOOKUP_KEY_HEADERS.to_string(), value.clone());
     m.insert(STATE_LOOKUP_KEY_REQ_HEADERS.to_string(), value);
 
-    if transform_flags.contains(TransformFlags::USES_GET_COOKIE) {
-        let cookies = parse_cookies_from_header_map(request_headers_map);
+    if transform_flags.intersects(TransformFlags::USES_GET_COOKIE | TransformFlags::USES_GET_COOKIE_I) {
+        let case_insensitive = transform_flags.contains(TransformFlags::USES_GET_COOKIE_I);
+        let cookies = parse_cookies_from_header_map(request_headers_map, case_insensitive);
         m.insert(
             STATE_LOOKUP_KEY_COOKIES.to_string(),
             minijinja::Value::from_serialize(&cookies),
@@ -643,8 +681,9 @@ pub fn transform_response<T: TransformationOps>(
         minijinja::Value::from_serialize(request_headers_map),
     );
 
-    if transform_flags.contains(TransformFlags::USES_GET_COOKIE) {
-        let cookies = parse_cookies_from_header_map(request_headers_map);
+    if transform_flags.intersects(TransformFlags::USES_GET_COOKIE | TransformFlags::USES_GET_COOKIE_I) {
+        let case_insensitive = transform_flags.contains(TransformFlags::USES_GET_COOKIE_I);
+        let cookies = parse_cookies_from_header_map(request_headers_map, case_insensitive);
         m.insert(
             STATE_LOOKUP_KEY_COOKIES.to_string(),
             minijinja::Value::from_serialize(&cookies),

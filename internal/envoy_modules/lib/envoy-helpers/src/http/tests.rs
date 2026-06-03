@@ -142,7 +142,7 @@ fn test_parse_cookie_string_whitespace_trimmed() {
 #[test]
 fn test_parse_cookies_from_header_map_missing_cookie() {
     let headers: HashMap<String, Vec<String>> = HashMap::new();
-    let cookies = parse_cookies_from_header_map(&headers);
+    let cookies = parse_cookies_from_header_map(&headers, false);
     assert!(cookies.is_empty());
 }
 
@@ -153,7 +153,7 @@ fn test_parse_cookies_from_header_map_with_cookie() {
         "cookie".to_string(),
         vec!["session=abc; user=johndoe".to_string()],
     );
-    let cookies = parse_cookies_from_header_map(&headers);
+    let cookies = parse_cookies_from_header_map(&headers, false);
     assert_eq!(cookies.get("session"), Some(&"abc".to_string()));
     assert_eq!(cookies.get("user"), Some(&"johndoe".to_string()));
 }
@@ -166,9 +166,23 @@ fn test_parse_cookies_from_header_map_multiple_cookie_headers() {
         "cookie".to_string(),
         vec!["session=abc".to_string(), "user=johndoe".to_string()],
     );
-    let cookies = parse_cookies_from_header_map(&headers);
+    let cookies = parse_cookies_from_header_map(&headers, false);
     assert_eq!(cookies.get("session"), Some(&"abc".to_string()));
     assert_eq!(cookies.get("user"), Some(&"johndoe".to_string()));
+}
+
+#[test]
+fn test_parse_cookies_from_header_map_case_insensitive() {
+    let mut headers: HashMap<String, Vec<String>> = HashMap::new();
+    headers.insert(
+        "cookie".to_string(),
+        vec!["Session=abc; USER=johndoe".to_string()],
+    );
+    let cookies = parse_cookies_from_header_map(&headers, true);
+    // Keys normalized to lowercase
+    assert_eq!(cookies.get("session"), Some(&"abc".to_string()));
+    assert_eq!(cookies.get("user"), Some(&"johndoe".to_string()));
+    assert_eq!(cookies.get("Session"), None);
 }
 
 #[test]

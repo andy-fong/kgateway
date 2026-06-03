@@ -74,18 +74,26 @@ pub fn parse_cookie_string(cookie_str: &str) -> HashMap<String, String> {
     cookies
 }
 
-/// Parse all Cookie header values from a header map into a single
-/// lowercase-name -> value map. Each Vec element is one Cookie header from
-/// Envoy; cookies within a header are ';'-separated. First-seen-wins for
-/// duplicate names across headers.
+/// Parse all Cookie header values from a header map into a name -> value map.
+/// Each Vec element is one Cookie header from Envoy; cookies within a header
+/// are ';'-separated. First-seen-wins for duplicate names across headers.
+/// When `case_insensitive` is true the cookie names are stored in lowercase,
+/// which is required by `get_cookie_i()`; leave it false for the
+/// case-sensitive `get_cookie()`.
 pub fn parse_cookies_from_header_map(
     headers: &HashMap<String, Vec<String>>,
+    case_insensitive: bool,
 ) -> HashMap<String, String> {
     let mut cookies = HashMap::new();
     if let Some(cookie_values) = get_header(headers, "cookie") {
         for cookie_str in cookie_values {
             for (name, value) in parse_cookie_string(cookie_str) {
-                cookies.entry(name).or_insert(value);
+                let key = if case_insensitive {
+                    name.to_lowercase()
+                } else {
+                    name
+                };
+                cookies.entry(key).or_insert(value);
             }
         }
     }

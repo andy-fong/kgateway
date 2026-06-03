@@ -256,6 +256,14 @@ impl FilterConfig {
             .map(transformation::jinja::compute_transform_flags)
             .unwrap_or(TransformFlags::empty());
 
+        let mixed = TransformFlags::USES_GET_COOKIE | TransformFlags::USES_GET_COOKIE_I;
+        if request_transform_flags.contains(mixed) || response_transform_flags.contains(mixed) {
+            envoy_log_warn!(
+                "get_cookie() and get_cookie_i() should not be mixed in the same transform; \
+                 get_cookie_i() (case-insensitive) takes precedence for the cookie map"
+            );
+        }
+
         Some(FilterConfig {
             transformations: config,
             env,
